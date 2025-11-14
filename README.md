@@ -1,4 +1,4 @@
-# Kubernetes Proxy Helper
+# Kubernetes Port Forward Helper
 
 Kubernetes 클러스터의 여러 컨텍스트에서 Pod 포트포워딩을 시각적으로 관리할 수 있는 Electron 데스크톱 애플리케이션입니다.
 
@@ -35,7 +35,7 @@ Kubernetes 클러스터의 여러 컨텍스트에서 Pod 포트포워딩을 시�
 1. 저장소를 클론하거나 다운로드합니다:
 ```bash
 git clone <repository-url>
-cd proxy-helper
+cd port-forward-helper
 ```
 
 2. 의존성을 설치합니다:
@@ -213,7 +213,7 @@ npx electron dist-electron/main.js
 ## 프로젝트 구조
 
 ```
-proxy-helper/
+port-forward-helper/
 ├── electron/              # Electron 메인 프로세스
 │   ├── main.ts           # 메인 프로세스 진입점 및 IPC 핸들러
 │   └── preload.ts        # Preload 스크립트 (보안 브릿지)

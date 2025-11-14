@@ -15,12 +15,19 @@ function App() {
   const [contexts, setContexts] = useState<KubernetesContext[]>([])
   const [activeContext, setActiveContext] = useState<string | null>(null)
   const [namespaces, setNamespaces] = useState<Namespace[]>([])
-  const [visibleNamespaces, setVisibleNamespaces] = useState<Set<string>>(new Set())
+  // 컨텍스트별로 선택된 네임스페이스를 저장 (Map<context, Set<namespace>>)
+  const [visibleNamespacesByContext, setVisibleNamespacesByContext] = useState<Map<string, Set<string>>>(new Map())
   const [podsByNamespace, setPodsByNamespace] = useState<Map<string, Pod[]>>(new Map())
   const [portForwards, setPortForwards] = useState<Map<string, Map<string, Map<number, PortForwardConfig>>>>(new Map())
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 현재 활성 컨텍스트의 선택된 네임스페이스를 가져오는 헬퍼 함수
+  const getVisibleNamespacesForContext = useCallback((context: string | null): Set<string> => {
+    if (!context) return new Set()
+    return visibleNamespacesByContext.get(context) || new Set()
+  }, [visibleNamespacesByContext])
 
   // 초기 컨텍스트 로드
   useEffect(() => {
@@ -66,11 +73,31 @@ function App() {
       const loadedNamespaces = await fetchNamespaces(context)
       setNamespaces(loadedNamespaces)
       
-      // 기본적으로 모든 네임스페이스 비활성화
-      setVisibleNamespaces(new Set())
+      // 저장된 선택 상태를 복원 (없으면 빈 Set)
+      const savedVisibleNamespaces = visibleNamespacesByContext.get(context) || new Set<string>()
+      
+      // 로드된 네임스페이스 중에서만 유효한 선택 상태 필터링
+      const validVisibleNamespaces = new Set<string>()
+      for (const ns of savedVisibleNamespaces) {
+        if (loadedNamespaces.some(loadedNs => loadedNs.name === ns)) {
+          validVisibleNamespaces.add(ns)
+        }
+      }
+      
+      // 유효한 선택 상태를 저장
+      setVisibleNamespacesByContext(prev => {
+        const newMap = new Map(prev)
+        newMap.set(context, validVisibleNamespaces)
+        return newMap
+      })
 
-      // Pod는 선택된 네임스페이스에 대해서만 로드하므로 여기서는 초기화만
-      setPodsByNamespace(new Map())
+      // 선택된 네임스페이스의 Pod를 로드
+      if (validVisibleNamespaces.size > 0) {
+        await loadPodsForNamespaces(context, Array.from(validVisibleNamespaces), false)
+      } else {
+        // Pod는 선택된 네임스페이스에 대해서만 로드하므로 여기서는 초기화만
+        setPodsByNamespace(new Map())
+      }
     } catch (error: any) {
       const errorMessage = error?.message || '데이터를 로드할 수 없습니다'
       console.error('데이터 로드 실패:', error)
@@ -125,8 +152,8 @@ function App() {
   const handleRefresh = async (context: string) => {
     setRefreshing(true)
     try {
-      // 현재 선택된 네임스페이스를 저장
-      const currentSelectedNamespaces = Array.from(visibleNamespaces)
+      // 현재 선택된 네임스페이스를 가져옴
+      const currentSelectedNamespaces = getVisibleNamespacesForContext(context)
       
       // 네임스페이스 목록만 새로고침 (선택은 유지)
       setLoading(true)
@@ -136,10 +163,16 @@ function App() {
         setNamespaces(loadedNamespaces)
         
         // 선택된 네임스페이스 복원 (로드된 네임스페이스 중에서만)
-        const validSelectedNamespaces = currentSelectedNamespaces.filter(ns => 
+        const validSelectedNamespaces = Array.from(currentSelectedNamespaces).filter(ns => 
           loadedNamespaces.some(loadedNs => loadedNs.name === ns)
         )
-        setVisibleNamespaces(new Set(validSelectedNamespaces))
+        
+        // 유효한 선택 상태를 저장
+        setVisibleNamespacesByContext(prev => {
+          const newMap = new Map(prev)
+          newMap.set(context, new Set(validSelectedNamespaces))
+          return newMap
+        })
         
         // 선택된 네임스페이스의 Pod만 다시 로드 (로딩 상태는 handleRefresh에서 관리)
         if (validSelectedNamespaces.length > 0) {
@@ -165,8 +198,13 @@ function App() {
   }
 
   const handleToggleNamespace = (namespace: string) => {
-    setVisibleNamespaces(prev => {
-      const newSet = new Set(prev)
+    if (!activeContext) return
+    
+    setVisibleNamespacesByContext(prev => {
+      const newMap = new Map(prev)
+      const currentSet = newMap.get(activeContext) || new Set<string>()
+      const newSet = new Set(currentSet)
+      
       if (newSet.has(namespace)) {
         newSet.delete(namespace)
         // Pod 데이터도 제거 (메모리 최적화)
@@ -178,11 +216,11 @@ function App() {
       } else {
         newSet.add(namespace)
         // 새로 선택된 네임스페이스의 Pod 로드 (이미 로드된 경우에도 최신 데이터로 갱신)
-        if (activeContext) {
-          loadPodsForNamespaces(activeContext, [namespace])
-        }
+        loadPodsForNamespaces(activeContext, [namespace])
       }
-      return newSet
+      
+      newMap.set(activeContext, newSet)
+      return newMap
     })
   }
 
@@ -295,18 +333,20 @@ function App() {
   const visiblePods = React.useMemo(() => {
     if (!activeContext) return []
     
+    const visibleNamespaces = getVisibleNamespacesForContext(activeContext)
     const allPods: Pod[] = []
     for (const namespace of visibleNamespaces) {
       const pods = podsByNamespace.get(namespace) || []
       allPods.push(...pods)
     }
     return allPods
-  }, [activeContext, visibleNamespaces, podsByNamespace])
+  }, [activeContext, visibleNamespacesByContext, podsByNamespace, getVisibleNamespacesForContext])
 
   // 현재 컨텍스트의 포트포워딩 맵 (Pod 이름 -> 포트 번호 -> 설정)
   const currentPortForwards = React.useMemo(() => {
     if (!activeContext) return new Map()
     
+    const visibleNamespaces = getVisibleNamespacesForContext(activeContext)
     const contextMap = portForwards.get(activeContext) || new Map()
     const result = new Map<string, Map<number, PortForwardConfig>>()
     
@@ -319,7 +359,7 @@ function App() {
     }
     
     return result
-  }, [activeContext, portForwards, visibleNamespaces])
+  }, [activeContext, portForwards, visibleNamespacesByContext, getVisibleNamespacesForContext])
 
   return (
     <div className="app">
@@ -333,29 +373,42 @@ function App() {
       <div className="app-content">
         <NamespaceList
           namespaces={namespaces}
-          visibleNamespaces={visibleNamespaces}
+          visibleNamespaces={getVisibleNamespacesForContext(activeContext)}
           onToggleNamespace={handleToggleNamespace}
           onSelectAll={() => {
+            if (!activeContext) return
             const allowedNamespacesSet = getAllowedNamespaces()
             const allowedNamespaces = namespaces
               .filter(ns => allowedNamespacesSet.has(ns.name))
               .map(ns => ns.name)
-            setVisibleNamespaces(new Set(allowedNamespaces))
+            
+            setVisibleNamespacesByContext(prev => {
+              const newMap = new Map(prev)
+              newMap.set(activeContext, new Set(allowedNamespaces))
+              return newMap
+            })
+            
             // 선택된 모든 네임스페이스의 Pod 병렬 로드
-            if (activeContext) {
-              loadPodsForNamespaces(activeContext, allowedNamespaces)
-            }
+            loadPodsForNamespaces(activeContext, allowedNamespaces)
           }}
           onDeselectAll={() => {
-            setVisibleNamespaces(new Set())
+            if (!activeContext) return
+            setVisibleNamespacesByContext(prev => {
+              const newMap = new Map(prev)
+              newMap.set(activeContext, new Set())
+              return newMap
+            })
             setPodsByNamespace(new Map())
           }}
           onSelectOnly={(namespace) => {
-            setVisibleNamespaces(new Set([namespace]))
+            if (!activeContext) return
+            setVisibleNamespacesByContext(prev => {
+              const newMap = new Map(prev)
+              newMap.set(activeContext, new Set([namespace]))
+              return newMap
+            })
             // 선택된 네임스페이스의 Pod만 로드
-            if (activeContext) {
-              loadPodsForNamespaces(activeContext, [namespace])
-            }
+            loadPodsForNamespaces(activeContext, [namespace])
           }}
         />
         <div className="main-content">

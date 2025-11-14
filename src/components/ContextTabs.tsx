@@ -20,7 +20,7 @@ export const ContextTabs: React.FC<ContextTabsProps> = ({
   return (
     <div className="context-tabs">
       <div className="context-tabs-header">
-        <h1 className="app-title">Kubernetes Proxy Helper</h1>
+        <h1 className="app-title">Kubernetes Port Forward Helper</h1>
         <div className="context-tabs-list">
           {contexts.length === 0 ? (
             <div className="no-contexts-message">컨텍스트를 로딩 중...</div>

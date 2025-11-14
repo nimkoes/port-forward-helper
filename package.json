@@ -1,5 +1,5 @@
 {
-  "name": "proxy-helper",
+  "name": "port-forward-helper",
   "version": "1.0.0",
   "description": "Kubernetes 포트포워딩 관리 Electron 애플리케이션",
   "main": "out/main/index.js",
