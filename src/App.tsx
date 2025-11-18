@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { ContextTabs } from './components/ContextTabs'
 import { NamespaceList } from './components/NamespaceList'
 import { PodList } from './components/PodList'
+import { ActivePortForwards } from './components/ActivePortForwards'
 import { useKubectl } from './hooks/useKubectl'
 import { usePortForward } from './hooks/usePortForward'
 import { getAllowedNamespaces } from './utils/config'
@@ -18,7 +19,7 @@ function App() {
   // 컨텍스트별로 선택된 네임스페이스를 저장 (Map<context, Set<namespace>>)
   const [visibleNamespacesByContext, setVisibleNamespacesByContext] = useState<Map<string, Set<string>>>(new Map())
   const [podsByNamespace, setPodsByNamespace] = useState<Map<string, Pod[]>>(new Map())
-  const [portForwards, setPortForwards] = useState<Map<string, Map<string, Map<number, PortForwardConfig>>>>(new Map())
+  const [portForwards, setPortForwards] = useState<Map<string, Map<string, Map<string, Map<number, PortForwardConfig>>>>>(new Map())
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -224,6 +225,23 @@ function App() {
     })
   }
 
+  // 모든 활성 포트포워딩의 외부 포트 목록 수집
+  const activeLocalPorts = React.useMemo(() => {
+    const ports = new Set<number>()
+    for (const [context, contextMap] of portForwards.entries()) {
+      for (const [namespace, namespaceMap] of contextMap.entries()) {
+        for (const [podName, podMap] of namespaceMap.entries()) {
+          for (const [remotePort, config] of podMap.entries()) {
+            if (config.active) {
+              ports.add(config.localPort)
+            }
+          }
+        }
+      }
+    }
+    return ports
+  }, [portForwards])
+
   const handlePortForwardChange = useCallback(async (
     podName: string,
     remotePort: number,
@@ -249,6 +267,12 @@ function App() {
     const configKey = `${activeContext}:${podNamespace}:${podName}`
 
     if (enabled) {
+      // 포트 중복 체크
+      if (activeLocalPorts.has(localPort)) {
+        alert(`포트 ${localPort}는 이미 사용 중입니다`)
+        return
+      }
+
       // 포트포워딩 시작
       try {
         const pid = await startPortForward(
@@ -327,7 +351,95 @@ function App() {
         }
       }
     }
-  }, [activeContext, podsByNamespace, portForwards, startPortForward, stopPortForward])
+  }, [activeContext, podsByNamespace, portForwards, activeLocalPorts, startPortForward, stopPortForward])
+
+  // 포트 변경 핸들러 (기존 포트포워딩 삭제 후 새 포트로 재생성)
+  const handleLocalPortUpdate = useCallback(async (
+    context: string,
+    namespace: string,
+    podName: string,
+    remotePort: number,
+    oldLocalPort: number,
+    newLocalPort: number
+  ) => {
+    // 포트 중복 체크
+    if (activeLocalPorts.has(newLocalPort) && newLocalPort !== oldLocalPort) {
+      alert(`포트 ${newLocalPort}는 이미 사용 중입니다`)
+      return
+    }
+
+    // 컨텍스트가 다른 경우 컨텍스트 전환
+    if (activeContext !== context && handleContextChange) {
+      handleContextChange(context)
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+
+    // 기존 포트포워딩 중지
+    const contextMap = portForwards.get(context)
+    const namespaceMap = contextMap?.get(namespace)
+    const podMap = namespaceMap?.get(podName)
+    const config = podMap?.get(remotePort)
+
+    if (config?.pid) {
+      try {
+        await stopPortForward(config.pid)
+        
+        // 포트포워딩 상태에서 제거
+        setPortForwards(prev => {
+          const newMap = new Map(prev)
+          const ctxMap = newMap.get(context)
+          const nsMap = ctxMap?.get(namespace)
+          const pMap = nsMap?.get(podName)
+          if (pMap) {
+            pMap.delete(remotePort)
+          }
+          return newMap
+        })
+
+        // 새 포트로 포트포워딩 재시작
+        await new Promise(resolve => setTimeout(resolve, 100))
+        const pid = await startPortForward(
+          context,
+          namespace,
+          podName,
+          newLocalPort,
+          remotePort
+        )
+
+        const newConfig: PortForwardConfig = {
+          id: `${context}:${namespace}:${podName}:${remotePort}`,
+          context,
+          namespace,
+          pod: podName,
+          localPort: newLocalPort,
+          remotePort,
+          pid,
+          active: true,
+        }
+
+        setPortForwards(prev => {
+          const newMap = new Map(prev)
+          if (!newMap.has(context)) {
+            newMap.set(context, new Map())
+          }
+          const ctxMap = newMap.get(context)!
+          if (!ctxMap.has(namespace)) {
+            ctxMap.set(namespace, new Map())
+          }
+          const nsMap = ctxMap.get(namespace)!
+          if (!nsMap.has(podName)) {
+            nsMap.set(podName, new Map())
+          }
+          const pMap = nsMap.get(podName)!
+          pMap.set(remotePort, newConfig)
+          return newMap
+        })
+      } catch (error) {
+        console.error('포트 변경 실패:', error)
+        alert(`포트 변경 실패: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }, [activeContext, portForwards, activeLocalPorts, startPortForward, stopPortForward, handleContextChange])
 
   // 현재 컨텍스트의 보이는 네임스페이스의 Pod 목록
   const visiblePods = React.useMemo(() => {
@@ -360,6 +472,54 @@ function App() {
     
     return result
   }, [activeContext, portForwards, visibleNamespacesByContext, getVisibleNamespacesForContext])
+
+  // 활성 포트포워딩 클릭 시 해당 위치로 스크롤
+  const handleScrollToPortForward = useCallback(async (
+    context: string,
+    namespace: string,
+    podName: string,
+    remotePort: number
+  ) => {
+    // 컨텍스트가 다른 경우 컨텍스트 전환
+    if (activeContext !== context) {
+      setActiveContext(context)
+      // 컨텍스트 전환 후 데이터 로드를 기다림
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+
+    // 네임스페이스가 선택되지 않은 경우 선택
+    const visibleNamespaces = getVisibleNamespacesForContext(context)
+    if (!visibleNamespaces.has(namespace)) {
+      setVisibleNamespacesByContext(prev => {
+        const newMap = new Map(prev)
+        const currentSet = newMap.get(context) || new Set<string>()
+        const newSet = new Set(currentSet)
+        newSet.add(namespace)
+        newMap.set(context, newSet)
+        return newMap
+      })
+      // Pod 로드 대기
+      await loadPodsForNamespaces(context, [namespace])
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+
+    // DOM에서 해당 요소 찾기
+    const targetElement = document.querySelector(
+      `[data-pod-name="${podName}"][data-namespace="${namespace}"][data-remote-port="${remotePort}"]`
+    )
+
+    if (targetElement) {
+      targetElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+      // 하이라이트 효과 (선택사항)
+      targetElement.classList.add('highlight-scroll-target')
+      setTimeout(() => {
+        targetElement.classList.remove('highlight-scroll-target')
+      }, 2000)
+    }
+  }, [activeContext, getVisibleNamespacesForContext, loadPodsForNamespaces])
 
   return (
     <div className="app">
@@ -444,6 +604,16 @@ function App() {
             />
           )}
         </div>
+        <ActivePortForwards
+          portForwards={portForwards}
+          podsByNamespace={podsByNamespace}
+          activeContext={activeContext}
+          activeLocalPorts={activeLocalPorts}
+          onPortForwardChange={handlePortForwardChange}
+          onLocalPortUpdate={handleLocalPortUpdate}
+          onContextChange={handleContextChange}
+          onItemClick={handleScrollToPortForward}
+        />
       </div>
     </div>
   )

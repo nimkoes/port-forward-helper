@@ -23,33 +23,45 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
   onDeselectAll,
   onSelectOnly,
 }) => {
+  const [isExpanded, setIsExpanded] = useState(true)
   const allowedNamespaces = namespaces.filter(ns => ALLOWED_NAMESPACES.has(ns.name))
   const allSelected = allowedNamespaces.length > 0 && allowedNamespaces.every(ns => visibleNamespaces.has(ns.name))
   const someSelected = allowedNamespaces.some(ns => visibleNamespaces.has(ns.name))
 
   return (
-    <div className="namespace-list">
+    <div className={`namespace-list ${isExpanded ? 'expanded' : 'collapsed'}`}>
       <div className="namespace-list-header">
         <h2>네임스페이스</h2>
-        <span className="namespace-count">{allowedNamespaces.length}</span>
+        <div className="namespace-header-right">
+          <span className="namespace-count">{allowedNamespaces.length}</span>
+          <button
+            className="namespace-collapse-button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            title={isExpanded ? '접기' : '펼치기'}
+          >
+            <span className={`collapse-icon ${isExpanded ? 'expanded' : 'collapsed'}`}>▼</span>
+          </button>
+        </div>
       </div>
-      <div className="namespace-controls">
-        <button 
-          className="namespace-control-button"
-          onClick={onSelectAll}
-          title="전부 선택"
-        >
-          전체
-        </button>
-        <button 
-          className="namespace-control-button"
-          onClick={onDeselectAll}
-          title="전부 해제"
-        >
-          해제
-        </button>
-      </div>
-      <div className="namespace-list-content">
+      {isExpanded && (
+        <>
+          <div className="namespace-controls">
+            <button 
+              className="namespace-control-button"
+              onClick={onSelectAll}
+              title="전부 선택"
+            >
+              전체
+            </button>
+            <button 
+              className="namespace-control-button"
+              onClick={onDeselectAll}
+              title="전부 해제"
+            >
+              해제
+            </button>
+          </div>
+          <div className="namespace-list-content">
         {namespaces.length === 0 ? (
           <div className="empty-state">네임스페이스가 없습니다</div>
         ) : (
@@ -81,7 +93,9 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
               )
             })
         )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

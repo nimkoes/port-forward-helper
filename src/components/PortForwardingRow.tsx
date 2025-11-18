@@ -77,6 +77,9 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
     <div 
       className={`port-forwarding-row ${isEnabled ? 'port-forwarding-active' : 'port-forwarding-inactive'}`}
       onClick={handleToggle}
+      data-pod-name={podName}
+      data-namespace={podNamespace}
+      data-remote-port={port.containerPort}
     >
       <div className="pod-row-content">
         {podNamespace && (

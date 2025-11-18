@@ -32,6 +32,26 @@
   background: #2a2a2a;
 }
 
+.port-forwarding-row.highlight-scroll-target {
+  background: rgba(0, 122, 204, 0.3) !important;
+  border-left-color: #007acc !important;
+  border-left-width: 5px !important;
+  box-shadow: 0 0 10px rgba(0, 122, 204, 0.5);
+  animation: highlight-pulse 0.5s ease-in-out;
+}
+
+@keyframes highlight-pulse {
+  0% {
+    box-shadow: 0 0 5px rgba(0, 122, 204, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 122, 204, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 10px rgba(0, 122, 204, 0.5);
+  }
+}
+
 .pod-row-content {
   display: flex;
   align-items: center;

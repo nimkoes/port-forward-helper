@@ -5,6 +5,12 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  transition: width 0.3s ease;
+  overflow: hidden;
+}
+
+.namespace-list.collapsed {
+  width: 50px;
 }
 
 .namespace-list-header {
@@ -13,6 +19,53 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.namespace-list.collapsed .namespace-list-header {
+  padding: 12px;
+  justify-content: center;
+}
+
+.namespace-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.namespace-list.collapsed .namespace-header-right {
+  gap: 0;
+}
+
+.namespace-collapse-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  transition: color 0.2s;
+}
+
+.namespace-collapse-button:hover {
+  color: #ccc;
+}
+
+.collapse-icon {
+  font-size: 10px;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.collapse-icon.expanded {
+  transform: rotate(0deg);
+}
+
+.collapse-icon.collapsed {
+  transform: rotate(-90deg);
 }
 
 .namespace-controls {
@@ -44,6 +97,14 @@
   font-size: 11px;
   font-weight: 600;
   color: #ccc;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.namespace-list.collapsed .namespace-list-header h2 {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
 }
 
 .namespace-count {
@@ -52,12 +113,20 @@
   background: #2d2d2d;
   padding: 2px 8px;
   border-radius: 10px;
+  transition: opacity 0.2s;
+}
+
+.namespace-list.collapsed .namespace-count {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
 }
 
 .namespace-list-content {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  transition: opacity 0.2s, max-height 0.2s;
 }
 
 .empty-state {
