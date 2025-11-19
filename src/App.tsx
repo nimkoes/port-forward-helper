@@ -242,6 +242,16 @@ function App() {
     return ports
   }, [portForwards])
 
+  // 사용 가능한 포트를 찾는 헬퍼 함수
+  const findAvailablePort = useCallback((startPort: number, activePorts: Set<number>): number | null => {
+    for (let port = startPort; port <= 65535; port++) {
+      if (!activePorts.has(port)) {
+        return port
+      }
+    }
+    return null
+  }, [])
+
   const handlePortForwardChange = useCallback(async (
     podName: string,
     remotePort: number,
@@ -267,10 +277,16 @@ function App() {
     const configKey = `${activeContext}:${podNamespace}:${podName}`
 
     if (enabled) {
-      // 포트 중복 체크
+      // 포트 중복 체크 및 자동 포트 찾기
+      let portToUse = localPort
       if (activeLocalPorts.has(localPort)) {
-        alert(`Port ${localPort} is already in use`)
-        throw new Error(`Port ${localPort} is already in use`)
+        // 중복된 포트인 경우 사용 가능한 포트 자동 찾기
+        const availablePort = findAvailablePort(localPort, activeLocalPorts)
+        if (availablePort === null) {
+          alert('No available port found (tried up to 65535)')
+          throw new Error('No available port found')
+        }
+        portToUse = availablePort
       }
 
       // 포트포워딩 시작
@@ -279,7 +295,7 @@ function App() {
           activeContext,
           podNamespace,
           podName,
-          localPort,
+          portToUse,
           remotePort
         )
 
@@ -288,7 +304,7 @@ function App() {
           context: activeContext,
           namespace: podNamespace,
           pod: podName,
-          localPort,
+          localPort: portToUse,
           remotePort,
           pid,
           active: true,
@@ -356,7 +372,7 @@ function App() {
         }
       }
     }
-  }, [activeContext, podsByNamespace, portForwards, activeLocalPorts, startPortForward, stopPortForward])
+  }, [activeContext, podsByNamespace, portForwards, activeLocalPorts, findAvailablePort, startPortForward, stopPortForward])
 
   // 포트 변경 핸들러 (기존 포트포워딩 삭제 후 새 포트로 재생성)
   const handleLocalPortUpdate = useCallback(async (
@@ -526,6 +542,56 @@ function App() {
     }
   }, [activeContext, getVisibleNamespacesForContext, loadPodsForNamespaces])
 
+  // 모든 활성 포트포워딩 비활성화
+  const handleDisableAllPortForwards = useCallback(async () => {
+    const activePortForwardsList: Array<{
+      context: string
+      namespace: string
+      podName: string
+      remotePort: number
+      localPort: number
+    }> = []
+
+    // 모든 활성 포트포워딩 수집
+    for (const [context, contextMap] of portForwards.entries()) {
+      for (const [namespace, namespaceMap] of contextMap.entries()) {
+        for (const [podName, podMap] of namespaceMap.entries()) {
+          for (const [remotePort, config] of podMap.entries()) {
+            if (config.active) {
+              activePortForwardsList.push({
+                context,
+                namespace,
+                podName,
+                remotePort,
+                localPort: config.localPort,
+              })
+            }
+          }
+        }
+      }
+    }
+
+    // 각 포트포워딩을 순차적으로 비활성화
+    for (const item of activePortForwardsList) {
+      // 컨텍스트가 다른 경우 컨텍스트 전환
+      if (activeContext !== item.context && handleContextChange) {
+        handleContextChange(item.context)
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      try {
+        await handlePortForwardChange(
+          item.podName,
+          item.remotePort,
+          item.localPort,
+          false
+        )
+      } catch (error) {
+        console.error(`Failed to disable port forward for ${item.podName}:${item.remotePort}`, error)
+      }
+    }
+  }, [portForwards, activeContext, handleContextChange, handlePortForwardChange])
+
   return (
     <div className="app">
       <ContextTabs
@@ -618,6 +684,7 @@ function App() {
           onLocalPortUpdate={handleLocalPortUpdate}
           onContextChange={handleContextChange}
           onItemClick={handleScrollToPortForward}
+          onDisableAll={handleDisableAllPortForwards}
         />
       </div>
     </div>

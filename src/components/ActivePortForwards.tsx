@@ -32,6 +32,7 @@ interface ActivePortForwardsProps {
     podName: string,
     remotePort: number
   ) => void
+  onDisableAll?: () => void
 }
 
 export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
@@ -43,6 +44,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
   onLocalPortUpdate,
   onContextChange,
   onItemClick,
+  onDisableAll,
 }) => {
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null)
   const [editingItemId, setEditingItemId] = React.useState<string | null>(null)
@@ -80,7 +82,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
       }
     }
 
-    return items
+    return items.sort((a, b) => a.localPort - b.localPort)
   }, [portForwards, podsByNamespace])
 
   if (activePortForwards.length === 0) {
@@ -101,7 +103,18 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
     <div className="active-port-forwards">
       <div className="active-port-forwards-header">
         <h2>Active Port Forward</h2>
-        <span className="active-count">{activePortForwards.length}</span>
+        <div className="active-port-forwards-header-right">
+          {onDisableAll && (
+            <button
+              className="active-port-forwards-disable-all-button"
+              onClick={onDisableAll}
+              title="Disable all port forwards"
+            >
+              Disable All
+            </button>
+          )}
+          <span className="active-count">{activePortForwards.length}</span>
+        </div>
       </div>
       <div className="active-port-forwards-content">
         {activePortForwards.map((item) => (
