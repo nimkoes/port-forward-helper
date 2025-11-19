@@ -87,11 +87,11 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
     return (
       <div className="active-port-forwards">
         <div className="active-port-forwards-header">
-          <h2>활성 포트포워딩</h2>
+          <h2>Active Port Forward</h2>
           <span className="active-count">0</span>
         </div>
         <div className="active-port-forwards-empty">
-          <p>활성화된 포트포워딩이 없습니다</p>
+          <p>No active port forwards</p>
         </div>
       </div>
     )
@@ -100,7 +100,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
   return (
     <div className="active-port-forwards">
       <div className="active-port-forwards-header">
-        <h2>활성 포트포워딩</h2>
+        <h2>Active Port Forward</h2>
         <span className="active-count">{activePortForwards.length}</span>
       </div>
       <div className="active-port-forwards-content">
@@ -130,7 +130,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
                   }
                   onPortForwardChange(item.pod, item.remotePort, item.localPort, false)
                 }}
-                title="포트포워딩 비활성화"
+                title="Disable Port Forward"
               >
                 ×
               </button>
@@ -157,7 +157,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
                       if (!isNaN(newPort) && newPort > 0 && newPort <= 65535) {
                         // 중복 체크 (자신의 기존 포트는 제외)
                         if (activeLocalPorts && activeLocalPorts.has(newPort) && newPort !== item.localPort) {
-                          alert(`포트 ${newPort}는 이미 사용 중입니다`)
+                          alert(`Port ${newPort} is already in use`)
                           setEditingPortValue(item.localPort.toString())
                           setEditingItemId(null)
                           return
@@ -174,7 +174,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
                         }
                         setEditingItemId(null)
                       } else {
-                        alert('유효한 포트 번호를 입력해주세요 (1-65535)')
+                        alert('Please enter a valid port number (1-65535)')
                         setEditingPortValue(item.localPort.toString())
                         setEditingItemId(null)
                       }
@@ -188,7 +188,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
                     if (!isNaN(newPort) && newPort > 0 && newPort <= 65535) {
                       // 중복 체크 (자신의 기존 포트는 제외)
                       if (activeLocalPorts && activeLocalPorts.has(newPort) && newPort !== item.localPort) {
-                        alert(`포트 ${newPort}는 이미 사용 중입니다`)
+                        alert(`Port ${newPort} is already in use`)
                         setEditingPortValue(item.localPort.toString())
                         setEditingItemId(null)
                         return
@@ -222,7 +222,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
                     setEditingPortValue(item.localPort.toString())
                   }}
                   style={{ cursor: 'pointer' }}
-                  title="클릭하여 포트 수정"
+                  title="Click to edit port"
                 >
                   {item.localPort}
                 </span>

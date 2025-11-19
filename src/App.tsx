@@ -48,7 +48,7 @@ function App() {
       const loadedContexts = await fetchContexts()
       
       if (loadedContexts.length === 0) {
-        setError('사용 가능한 Kubernetes 컨텍스트가 없습니다. kubectl config get-contexts로 확인해주세요.')
+        setError('No available Kubernetes contexts. Please check with kubectl config get-contexts.')
         return
       }
       
@@ -60,8 +60,8 @@ function App() {
         setActiveContext(currentContext.name)
       }
     } catch (error: any) {
-      const errorMessage = error?.message || '컨텍스트를 로드할 수 없습니다'
-      console.error('컨텍스트 로드 실패:', error)
+      const errorMessage = error?.message || 'Failed to load contexts'
+      console.error('Failed to load contexts:', error)
       setError(errorMessage)
     }
   }
@@ -100,8 +100,8 @@ function App() {
         setPodsByNamespace(new Map())
       }
     } catch (error: any) {
-      const errorMessage = error?.message || '데이터를 로드할 수 없습니다'
-      console.error('데이터 로드 실패:', error)
+      const errorMessage = error?.message || 'Failed to load data'
+      console.error('Failed to load data:', error)
       setError(errorMessage)
     } finally {
       setLoading(false)
@@ -126,7 +126,7 @@ function App() {
           const pods = await fetchPods(context, namespace)
           return { namespace, pods }
         } catch (error) {
-          console.error(`네임스페이스 ${namespace}의 Pod 로드 실패:`, error)
+          console.error(`Failed to load pods for namespace ${namespace}:`, error)
           return { namespace, pods: [] }
         }
       })
@@ -142,7 +142,7 @@ function App() {
         return newMap
       })
     } catch (error) {
-      console.error('Pod 로드 실패:', error)
+      console.error('Failed to load pods:', error)
     } finally {
       if (setLoadingState) {
         setLoading(false)
@@ -183,8 +183,8 @@ function App() {
           setPodsByNamespace(new Map())
         }
       } catch (error: any) {
-        const errorMessage = error?.message || '데이터를 로드할 수 없습니다'
-        console.error('데이터 로드 실패:', error)
+        const errorMessage = error?.message || 'Failed to load data'
+        console.error('Failed to load data:', error)
         setError(errorMessage)
       } finally {
         setLoading(false)
@@ -260,7 +260,7 @@ function App() {
     }
 
     if (!podNamespace) {
-      console.error('Pod의 네임스페이스를 찾을 수 없습니다:', podName)
+      console.error('Cannot find namespace for pod:', podName)
       return
     }
 
@@ -269,8 +269,8 @@ function App() {
     if (enabled) {
       // 포트 중복 체크
       if (activeLocalPorts.has(localPort)) {
-        alert(`포트 ${localPort}는 이미 사용 중입니다`)
-        throw new Error(`포트 ${localPort}는 이미 사용 중입니다`)
+        alert(`Port ${localPort} is already in use`)
+        throw new Error(`Port ${localPort} is already in use`)
       }
 
       // 포트포워딩 시작
@@ -312,11 +312,11 @@ function App() {
           return newMap
         })
       } catch (error) {
-        console.error('포트포워딩 시작 실패:', error)
+        console.error('Failed to start port forward:', error)
         const errorMessage = error instanceof Error ? error.message : String(error)
         // 중복 포트 에러는 이미 alert를 표시했으므로 다시 표시하지 않음
-        if (!errorMessage.includes('이미 사용 중입니다')) {
-          alert(`포트포워딩 시작 실패: ${errorMessage}`)
+        if (!errorMessage.includes('already in use')) {
+          alert(`Failed to start port forward: ${errorMessage}`)
         }
         throw error
       }
@@ -351,8 +351,8 @@ function App() {
             return newMap
           })
         } catch (error) {
-          console.error('포트포워딩 중지 실패:', error)
-          alert(`포트포워딩 중지 실패: ${error instanceof Error ? error.message : String(error)}`)
+          console.error('Failed to stop port forward:', error)
+          alert(`Failed to stop port forward: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
@@ -369,7 +369,7 @@ function App() {
   ) => {
     // 포트 중복 체크
     if (activeLocalPorts.has(newLocalPort) && newLocalPort !== oldLocalPort) {
-      alert(`포트 ${newLocalPort}는 이미 사용 중입니다`)
+      alert(`Port ${newLocalPort} is already in use`)
       return
     }
 
@@ -440,8 +440,8 @@ function App() {
           return newMap
         })
       } catch (error) {
-        console.error('포트 변경 실패:', error)
-        alert(`포트 변경 실패: ${error instanceof Error ? error.message : String(error)}`)
+        console.error('Failed to update port:', error)
+        alert(`Failed to update port: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
   }, [activeContext, portForwards, activeLocalPorts, startPortForward, stopPortForward, handleContextChange])
@@ -580,7 +580,7 @@ function App() {
           {error ? (
             <div className="error-state">
               <div className="error-message">
-                <h3>오류 발생</h3>
+                <h3>Error</h3>
                 <p>{error}</p>
                 <button 
                   className="retry-button"
@@ -592,14 +592,14 @@ function App() {
                     }
                   }}
                 >
-                  다시 시도
+                  Retry
                 </button>
               </div>
             </div>
           ) : loading ? (
             <div className="loading-state">
               <div className="loading-spinner"></div>
-              <p>로딩 중...</p>
+              <p>Loading...</p>
             </div>
           ) : (
             <PodList

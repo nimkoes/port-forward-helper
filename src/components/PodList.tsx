@@ -22,7 +22,7 @@ export const PodList: React.FC<PodListProps> = ({
   if (pods.length === 0) {
     return (
       <div className="pod-list-empty">
-        <p>Pod가 없습니다</p>
+        <p>No pods</p>
       </div>
     )
   }
@@ -53,7 +53,7 @@ export const PodList: React.FC<PodListProps> = ({
   if (sortedPods.length === 0) {
     return (
       <div className="pod-list-empty">
-        <p>Pod가 없습니다</p>
+        <p>No pods</p>
       </div>
     )
   }
@@ -75,7 +75,7 @@ export const PodList: React.FC<PodListProps> = ({
                   {pod.status}
                 </span>
                 <span className="pod-age-inline">{pod.age}</span>
-                <div className="pod-row-empty">포트 정보 없음</div>
+                <div className="pod-row-empty">No port info</div>
               </div>
             </div>
           )

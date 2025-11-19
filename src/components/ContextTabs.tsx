@@ -23,7 +23,7 @@ export const ContextTabs: React.FC<ContextTabsProps> = ({
         <h1 className="app-title">Kubernetes Port Forward Helper</h1>
         <div className="context-tabs-list">
           {contexts.length === 0 ? (
-            <div className="no-contexts-message">컨텍스트를 로딩 중...</div>
+            <div className="no-contexts-message">Loading contexts...</div>
           ) : (
             contexts.map((context) => (
               <div
@@ -36,7 +36,7 @@ export const ContextTabs: React.FC<ContextTabsProps> = ({
                 >
                   <span className="context-name">{context.name}</span>
                   {context.current && (
-                    <span className="current-badge">현재</span>
+                    <span className="current-badge">Current</span>
                   )}
                 </button>
                 {activeContext === context.name && (
@@ -44,7 +44,7 @@ export const ContextTabs: React.FC<ContextTabsProps> = ({
                     className="refresh-button"
                     onClick={() => onRefresh(context.name)}
                     disabled={refreshing}
-                    title="새로고침"
+                    title="Refresh"
                   >
                     {refreshing ? '⟳' : '↻'}
                   </button>

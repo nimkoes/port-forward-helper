@@ -31,13 +31,13 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
   return (
     <div className={`namespace-list ${isExpanded ? 'expanded' : 'collapsed'}`}>
       <div className="namespace-list-header">
-        <h2>네임스페이스</h2>
+        <h2>namespace</h2>
         <div className="namespace-header-right">
           <span className="namespace-count">{allowedNamespaces.length}</span>
           <button
             className="namespace-collapse-button"
             onClick={() => setIsExpanded(!isExpanded)}
-            title={isExpanded ? '접기' : '펼치기'}
+            title={isExpanded ? 'Collapse' : 'Expand'}
           >
             <span className={`collapse-icon ${isExpanded ? 'expanded' : 'collapsed'}`}>▼</span>
           </button>
@@ -49,21 +49,21 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
             <button 
               className="namespace-control-button"
               onClick={onSelectAll}
-              title="전부 선택"
+              title="Select All"
             >
-              전체
+              all
             </button>
             <button 
               className="namespace-control-button"
               onClick={onDeselectAll}
-              title="전부 해제"
+              title="Deselect All"
             >
-              해제
+              clear
             </button>
           </div>
           <div className="namespace-list-content">
         {namespaces.length === 0 ? (
-          <div className="empty-state">네임스페이스가 없습니다</div>
+          <div className="empty-state">No namespaces</div>
         ) : (
           // 허용된 네임스페이스만 필터링하고 알파벳 순으로 정렬
           [...namespaces]
@@ -85,7 +85,7 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
                       e.stopPropagation()
                       onSelectOnly(namespace.name)
                     }}
-                    title={`${namespace.name}만 보기`}
+                    title={`View ${namespace.name} only`}
                   >
                     Only
                   </button>

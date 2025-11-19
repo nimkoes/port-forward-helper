@@ -53,7 +53,7 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
     
     const localPortNum = parseInt(localPort, 10)
     if (isNaN(localPortNum) || localPortNum <= 0) {
-      alert('유효한 로컬 포트 번호를 입력해주세요')
+      alert('Please enter a valid local port number')
       setIsEnabled(previousEnabled)
       return
     }
@@ -110,7 +110,7 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
           value={localPort}
           onChange={handleLocalPortChange}
           onClick={(e) => e.stopPropagation()}
-          placeholder="외부 포트"
+          placeholder="Local Port"
           min="1"
           max="65535"
           disabled={isEnabled}
