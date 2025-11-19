@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import type { ContainerPort, PortForwardConfig } from '@/types'
+import { getNamespaceDefaultPorts } from '@/utils/config'
 import './PortForwardingRow.css'
 
 interface PortForwardingRowProps {
@@ -26,20 +27,48 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
   portForward,
   onPortForwardChange,
 }) => {
+  // 네임스페이스별 기본 포트 가져오기
+  const namespaceDefaultPorts = useMemo(() => getNamespaceDefaultPorts(), [])
+  
+  // 기본 포트 결정: 포트포워딩이 있으면 그것을 사용, 없으면 네임스페이스 기본 포트 또는 containerPort
+  const getDefaultPort = useCallback((): number => {
+    if (portForward) {
+      return portForward.localPort
+    }
+    if (podNamespace) {
+      const defaultPort = namespaceDefaultPorts.get(podNamespace)
+      if (defaultPort !== undefined) {
+        console.log(`[PortForwardingRow] 네임스페이스 "${podNamespace}"의 기본 포트 사용: ${defaultPort}`)
+        return defaultPort
+      } else {
+        console.log(`[PortForwardingRow] 네임스페이스 "${podNamespace}"에 기본 포트가 설정되지 않음, containerPort 사용: ${port.containerPort}`)
+      }
+    }
+    return port.containerPort
+  }, [portForward, podNamespace, namespaceDefaultPorts, port.containerPort])
+
+  // 초기값은 containerPort로 설정하고, useEffect에서 네임스페이스 기본 포트를 적용
   const [localPort, setLocalPort] = useState<string>(
-    portForward?.localPort.toString() || port.containerPort.toString()
+    port.containerPort.toString()
   )
   const [isEnabled, setIsEnabled] = useState(portForward?.active || false)
 
   useEffect(() => {
     if (portForward) {
+      // 포트포워딩이 활성화되어 있으면 그 포트 사용
       setLocalPort(portForward.localPort.toString())
       setIsEnabled(portForward.active)
     } else {
-      setLocalPort(port.containerPort.toString())
+      // 포트포워딩이 없으면 네임스페이스 기본 포트 또는 containerPort 사용
+      // getDefaultPort는 podNamespace를 dependency로 가지고 있어서,
+      // podNamespace가 변경되면 자동으로 최신 네임스페이스 기본 포트를 가져옴
+      const defaultPort = getDefaultPort()
+      setLocalPort(defaultPort.toString())
       setIsEnabled(false)
     }
-  }, [portForward, port.containerPort])
+    // getDefaultPort의 dependency에 podNamespace가 포함되어 있어서,
+    // podNamespace 변경 시에도 이 useEffect가 실행됨
+  }, [portForward, getDefaultPort])
 
   const handleToggle = async (e: React.MouseEvent) => {
     // input 필드 클릭 시에는 토글하지 않음
