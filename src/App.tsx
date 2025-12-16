@@ -54,6 +54,7 @@ function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [allForwarding, setAllForwarding] = useState<Set<string>>(new Set())
+  const [allForwardProgress, setAllForwardProgress] = useState<Map<string, { current: number; total: number }>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [proxyServerPort, setProxyServerPort] = useState<number | null>(null)
   const proxyServerPortRef = useRef<number | null>(null)
@@ -376,25 +377,42 @@ function App() {
       setLoading(true)
     }
     try {
+      // 이미 로드된 namespace 필터링 (중복 호출 방지)
+      const namespacesToLoad = namespaceNames.filter(namespace => {
+        if (!namespace || namespace.trim() === '') {
+          return false
+        }
+        // 이미 Pod와 Service가 모두 로드되어 있으면 건너뛰기
+        const existingPods = podsByNamespace.get(namespace)
+        const contextServices = servicesByContextAndNamespace.get(context)
+        const namespaceServices = contextServices?.get(namespace) || []
+        return !(existingPods && existingPods.length > 0 && namespaceServices.length > 0)
+      })
+
+      if (namespacesToLoad.length === 0) {
+        // 모두 이미 로드되어 있으면 상태만 업데이트하고 종료
+        if (setLoadingState) {
+          setLoading(false)
+        }
+        return
+      }
+
       // 병렬로 모든 네임스페이스의 Pod와 Service 로드
-      // 이미 로드된 네임스페이스도 포함하여 최신 데이터로 갱신
-      const promises = namespaceNames
-        .filter(namespace => namespace && namespace.trim() !== '') // 빈 namespace 필터링
-        .map(async (namespace) => {
-          try {
-            const [pods, services] = await Promise.all([
-              fetchPods(context, namespace),
-              getServices(context, namespace).catch(error => {
-                console.error(`Failed to load services for namespace ${namespace}:`, error)
-                return []
-              })
-            ])
-            return { namespace, pods, services }
-          } catch (error) {
-            console.error(`Failed to load pods for namespace ${namespace}:`, error)
-            return { namespace, pods: [], services: [] }
-          }
-        })
+      const promises = namespacesToLoad.map(async (namespace) => {
+        try {
+          const [pods, services] = await Promise.all([
+            fetchPods(context, namespace),
+            getServices(context, namespace).catch(error => {
+              console.error(`Failed to load services for namespace ${namespace}:`, error)
+              return []
+            })
+          ])
+          return { namespace, pods, services }
+        } catch (error) {
+          console.error(`Failed to load pods for namespace ${namespace}:`, error)
+          return { namespace, pods: [], services: [] }
+        }
+      })
 
       const results = await Promise.all(promises)
       
@@ -426,7 +444,7 @@ function App() {
         setLoading(false)
       }
     }
-  }, [fetchPods])
+  }, [fetchPods, podsByNamespace, servicesByContextAndNamespace])
 
   const loadDataForContext = useCallback(async (context: string) => {
     setLoading(true)
@@ -1100,12 +1118,18 @@ function App() {
         allNamespaces = namespaces
       }
 
-      // 모든 namespace의 services와 pods 로드
+      // 모든 namespace의 services와 pods 로드 (한 번만)
       const namespaceNames = allNamespaces.map(ns => ns.name)
       await loadPodsForNamespaces(context, namespaceNames, false)
       
-      // 각 namespace의 services와 pods 가져오기
-      const forwardPromises: Promise<void>[] = []
+      // 포트포워딩할 서비스 목록 수집
+      const servicesToForward: Array<{
+        context: string
+        service: Service
+        namespace: string
+        httpPort: ServicePort
+        pod: Pod
+      }> = []
       
       for (const namespace of allNamespaces) {
         // 이미 로드된 services와 pods 사용
@@ -1205,22 +1229,49 @@ function App() {
             remotePort = podPort.containerPort
           }
 
-          // 포트포워딩 시작
-          forwardPromises.push(
-            handlePortForwardChange(
-              context,
-              service.name,
-              namespace.name,
-              httpPort.targetPort,
-              true
-            ).catch(error => {
-              console.error(`Failed to forward ${service.name} in ${namespace.name}:`, error)
-            })
-          )
+          servicesToForward.push({
+            context,
+            service,
+            namespace: namespace.name,
+            httpPort,
+            pod: matchedPod
+          })
         }
       }
 
-      await Promise.all(forwardPromises)
+      // 프로그레스 초기화
+      setAllForwardProgress(prev => {
+        const next = new Map(prev)
+        next.set(context, { current: 0, total: servicesToForward.length })
+        return next
+      })
+
+      // 순차적으로 포트포워딩 처리 (상태 업데이트 최소화)
+      for (let i = 0; i < servicesToForward.length; i++) {
+        const { service, namespace, httpPort } = servicesToForward[i]
+        try {
+          await handlePortForwardChange(
+            context,
+            service.name,
+            namespace,
+            httpPort.targetPort,
+            true
+          )
+          // 프로그레스 업데이트
+          setAllForwardProgress(prev => {
+            const next = new Map(prev)
+            const current = next.get(context)
+            if (current) {
+              next.set(context, { current: i + 1, total: current.total })
+            }
+            return next
+          })
+          // 각 포트포워딩 사이에 짧은 딜레이 (상태 업데이트 안정화)
+          await new Promise(resolve => setTimeout(resolve, 100))
+        } catch (error) {
+          console.error(`Failed to forward ${service.name} in ${namespace}:`, error)
+        }
+      }
     } catch (error) {
       console.error('Failed to forward all services:', error)
       alert(`Failed to forward all services: ${error instanceof Error ? error.message : String(error)}`)
@@ -1230,12 +1281,22 @@ function App() {
         next.delete(context)
         return next
       })
+      setAllForwardProgress(prev => {
+        const next = new Map(prev)
+        next.delete(context)
+        return next
+      })
     }
   }, [allForwarding, namespacesByContext, servicesByContextAndNamespace, podsByNamespace, portForwards, isHttpServicePort, handlePortForwardChange, fetchNamespaces, loadPodsForNamespaces])
 
 
   // 포트포워딩 중인 Pod의 namespace를 자동으로 로드
   useEffect(() => {
+    // allForwarding이 진행 중이면 자동 로드 건너뛰기 (무한루프 방지)
+    if (allForwarding.size > 0) {
+      return
+    }
+
     const namespacesToLoad = new Set<{ context: string; namespace: string }>()
     
     // 모든 포트포워딩 중인 Pod의 namespace 수집 (Map 기반 조회로 최적화)
@@ -1272,7 +1333,7 @@ function App() {
         loadPodsForNamespaces(context, [namespace], false)
       }
     }
-  }, [portForwards, podsByNameMap, podsByNamespace, servicesByContextAndNamespace, loadPodsForNamespaces])
+  }, [portForwards, podsByNameMap, podsByNamespace, servicesByContextAndNamespace, loadPodsForNamespaces, allForwarding])
 
   // 현재 컨텍스트의 보이는 네임스페이스의 Pod 목록 + 포트포워딩 중인 모든 Pod
   const visiblePods = React.useMemo(() => {
@@ -1592,6 +1653,7 @@ function App() {
           onAllForward={handleAllForward}
           refreshing={refreshing}
           allForwarding={allForwarding}
+          allForwardProgress={allForwardProgress}
         />
         <div className="main-content">
           {error ? (

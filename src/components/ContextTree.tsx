@@ -17,6 +17,7 @@ interface ContextTreeProps {
   onAllForward: (context: string) => void
   refreshing: boolean
   allForwarding: Set<string>
+  allForwardProgress: Map<string, { current: number; total: number }>
 }
 
 // 제외할 namespace 목록
@@ -52,6 +53,7 @@ export const ContextTree: React.FC<ContextTreeProps> = ({
   onAllForward,
   refreshing,
   allForwarding,
+  allForwardProgress,
 }) => {
   // 선택된 컨텍스트 상태
   const [selectedContext, setSelectedContext] = useState<string | null>(null)
@@ -169,7 +171,12 @@ export const ContextTree: React.FC<ContextTreeProps> = ({
               {allForwarding.has(context.name) ? (
                 <>
                   <span className="all-forward-spinner">⟳</span>
-                  <span>forwarding...</span>
+                  <span>
+                    {(() => {
+                      const progress = allForwardProgress.get(context.name)
+                      return progress ? `${progress.current}/${progress.total}` : 'forwarding...'
+                    })()}
+                  </span>
                 </>
               ) : (
                 'all forward'
