@@ -4,14 +4,22 @@ import { fileURLToPath } from 'url'
 import { exec, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
+import { config } from 'dotenv'
 import { KubeConfig, CoreV1Api, PortForward } from '@kubernetes/client-node'
 import net from 'net'
 import portfinder from 'portfinder'
 import * as proxyServer from './proxy-server'
 import { HostsManager } from './hosts-manager'
 
-const execAsync = promisify(exec)
+// .env 파일 로드
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
+const envPath = join(__dirname, '../../.env')
+if (existsSync(envPath)) {
+  config({ path: envPath })
+  console.log('[Main] Loaded .env file from:', envPath)
+}
+
+const execAsync = promisify(exec)
 
 let mainWindow: BrowserWindow | null = null
 

@@ -9,6 +9,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview"
   },
+  "scripts-comments": {
+    "dev-with-sudo": "SUDO_PASSWORD=your_password npm run dev",
+    "note": "환경변수 SUDO_PASSWORD를 설정하면 hosts 파일 수정 시 비밀번호를 자동으로 사용합니다."
+  },
   "keywords": [
     "kubernetes",
     "kubectl",
@@ -30,6 +34,7 @@
   },
   "dependencies": {
     "@kubernetes/client-node": "^1.4.0",
+    "dotenv": "^16.3.1",
     "express": "^4.18.3",
     "hostile": "^1.4.0",
     "http-proxy-middleware": "^2.0.6",

@@ -32,7 +32,14 @@ export class HostsManager {
         // 권한 오류인 경우 sudo로 읽기
         const { execSync } = require('child_process')
         try {
-          content = execSync(`sudo cat "${hostsPath}"`, { encoding: 'utf-8' })
+          const sudoPassword = process.env.SUDO_PASSWORD
+          let readCommand: string
+          if (sudoPassword) {
+            readCommand = `echo "${sudoPassword}" | sudo -S cat "${hostsPath}"`
+          } else {
+            readCommand = `sudo cat "${hostsPath}"`
+          }
+          content = execSync(readCommand, { encoding: 'utf-8' })
         } catch (sudoError: any) {
           console.error('[Hosts Manager] Failed to read hosts file even with sudo:', sudoError)
           // 읽기 실패 시 빈 파일로 처리
@@ -146,10 +153,24 @@ export class HostsManager {
       writeFileSync(tempFile, content, 'utf-8')
       
       // sudo로 복사하고 권한 설정 (644: owner read/write, others read)
-      console.log(`[Hosts Manager] Executing: sudo cp "${tempFile}" "${hostsPath}" && sudo chmod 644 "${hostsPath}"`)
-      const { stdout, stderr } = await execAsync(`sudo cp "${tempFile}" "${hostsPath}" && sudo chmod 644 "${hostsPath}" && rm "${tempFile}"`)
+      // 환경변수 SUDO_PASSWORD가 있으면 사용, 없으면 일반 sudo (비밀번호 요청)
+      const sudoPassword = process.env.SUDO_PASSWORD
+      let command: string
+      
+      if (sudoPassword) {
+        // 비밀번호를 stdin으로 전달 (-S 옵션)
+        command = `echo "${sudoPassword}" | sudo -S cp "${tempFile}" "${hostsPath}" && echo "${sudoPassword}" | sudo -S chmod 644 "${hostsPath}" && rm "${tempFile}"`
+        console.log(`[Hosts Manager] Using SUDO_PASSWORD from environment variable`)
+      } else {
+        // 일반 sudo (비밀번호 요청)
+        command = `sudo cp "${tempFile}" "${hostsPath}" && sudo chmod 644 "${hostsPath}" && rm "${tempFile}"`
+        console.log(`[Hosts Manager] SUDO_PASSWORD not set, will prompt for password`)
+      }
+      
+      console.log(`[Hosts Manager] Executing: ${command.replace(sudoPassword || '', '***')}`)
+      const { stdout, stderr } = await execAsync(command)
       if (stdout) console.log(`[Hosts Manager] stdout:`, stdout)
-      if (stderr) console.log(`[Hosts Manager] stderr:`, stderr)
+      if (stderr && !stderr.includes('Password:')) console.log(`[Hosts Manager] stderr:`, stderr)
       console.log(`[Hosts Manager] Successfully wrote hosts file`)
     } catch (error: any) {
       console.error('[Hosts Manager] Failed to write hosts file:', error)
