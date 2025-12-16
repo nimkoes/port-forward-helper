@@ -1,7 +1,211 @@
 .pod-list {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
+  height: 100%;
+  min-height: 0;
   background: #1e1e1e;
+}
+
+.pod-list-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid #2d2d2d;
+  border-left: 4px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+  background: #252526;
+}
+
+.pod-list-row:hover {
+  background: #2a2a2a;
+}
+
+.pod-list-row.has-port-forward {
+  border-left-color: #4ec9b0;
+  border-left-width: 5px;
+  background: #1e2a2a;
+}
+
+.pod-list-row.has-port-forward:hover {
+  background: #2a3a3a;
+}
+
+.pod-list-row.no-pod {
+  opacity: 0.6;
+}
+
+.pod-list-row.no-pod:hover {
+  opacity: 0.8;
+}
+
+.pod-list-row-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pod-list-row-line {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.pod-list-info-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  width: 100%;
+}
+
+.pod-list-deployment {
+  font-weight: 600;
+  color: #cccccc;
+}
+
+.pod-list-separator {
+  color: #555;
+  font-weight: 300;
+}
+
+.pod-list-namespace {
+  color: #858585;
+}
+
+.pod-list-service-name {
+  color: #4ec9b0;
+  font-weight: 500;
+}
+
+.pod-list-target-port {
+  color: #dcdcaa;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
+.pod-list-port-forward-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cccccc;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.pod-list-port-label {
+  font-size: 10px;
+  color: #858585;
+  font-weight: 500;
+}
+
+.pod-list-port-value {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  padding: 2px 6px;
+  background: #2a3a3a;
+  border-radius: 3px;
+  color: #cccccc;
+  font-size: 11px;
+}
+
+.pod-list-arrow {
+  color: #4ec9b0;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.pod-list-pod-name-label {
+  font-size: 11px;
+  color: #858585;
+  font-weight: 500;
+}
+
+.pod-list-pod-name {
+  font-size: 11px;
+  color: #858585;
+  font-family: 'Courier New', monospace;
+}
+
+.pod-list-pod-count-label {
+  font-size: 11px;
+  color: #858585;
+  font-weight: 500;
+}
+
+.pod-list-pod-count {
+  font-size: 11px;
+  color: #cccccc;
+  font-weight: 600;
+}
+
+.pod-list-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.pod-list-status-running {
+  background: #264f78;
+  color: #4ec9b0;
+}
+
+.pod-list-status-pending {
+  background: #5a4d1f;
+  color: #dcdcaa;
+}
+
+.pod-list-status-failed {
+  background: #5a1f1f;
+  color: #f48771;
+}
+
+.pod-list-url-text {
+  font-size: 11px;
+  color: #4ec9b0;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pod-list-url-copy-button {
+  background: transparent;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 12px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+}
+
+.pod-list-url-copy-button:hover {
+  background: #2a2d2e;
+  color: #4ec9b0;
+}
+
+.pod-list-failure-reason {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: #858585;
+}
+
+.pod-list-failure-text {
+  color: #858585;
+}
+
+.pod-list-failure-details {
+  color: #666;
+  font-size: 10px;
+  margin-left: 4px;
 }
 
 .pod-list-empty {
@@ -13,114 +217,3 @@
   font-size: 13px;
   padding: 32px;
 }
-
-.deployment-group {
-  border-bottom: 1px solid #333;
-}
-
-.deployment-header {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  cursor: pointer;
-  background: #252525;
-  transition: background 0.2s;
-  user-select: none;
-}
-
-.deployment-header:hover {
-  background: #2d2d2d;
-}
-
-.deployment-expand-icon {
-  width: 16px;
-  margin-right: 8px;
-  color: #888;
-  font-size: 10px;
-}
-
-.deployment-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: #ccc;
-  flex: 1;
-}
-
-.deployment-pod-count {
-  font-size: 11px;
-  color: #888;
-  margin-left: 8px;
-}
-
-.deployment-pods {
-  background: #1e1e1e;
-}
-
-.pod-item {
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.pod-item-header {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px 8px 40px;
-  background: #222;
-}
-
-.pod-item-header input[type="checkbox"] {
-  margin-right: 8px;
-  cursor: pointer;
-}
-
-.pod-item-header .pod-name {
-  font-size: 12px;
-  color: #aaa;
-  flex: 1;
-}
-
-.pod-item-header .pod-status {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  margin-left: 8px;
-}
-
-.port-item {
-  display: flex;
-  align-items: center;
-  padding: 6px 16px 6px 56px;
-  cursor: pointer;
-  transition: background 0.2s;
-  font-size: 12px;
-}
-
-.port-item:hover {
-  background: #2a2a2a;
-}
-
-.port-item.port-active {
-  background: #2d3a2d;
-}
-
-.port-item.port-active:hover {
-  background: #334033;
-}
-
-.port-name {
-  color: #888;
-  margin-right: 8px;
-  min-width: 60px;
-}
-
-.port-number {
-  color: #aaa;
-  margin-right: 12px;
-  font-family: monospace;
-}
-
-.port-domain {
-  color: #007acc;
-  font-weight: 500;
-  flex: 1;
-}
-

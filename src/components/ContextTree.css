@@ -1,0 +1,256 @@
+.context-tree {
+  width: 280px;
+  background: #252526;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.context-tree-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.context-tree-header h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ccc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.context-tree-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.empty-state {
+  padding: 16px;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+}
+
+.context-tree-node {
+  margin-bottom: 2px;
+}
+
+.context-tree-node-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 3px;
+  transition: background 0.15s;
+  gap: 4px;
+}
+
+.context-tree-node-header:hover {
+  background: #2a2d2e;
+}
+
+.tree-expand-icon {
+  width: 16px;
+  font-size: 10px;
+  color: #858585;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.context-tree-node-name {
+  flex: 1;
+  font-size: 12px;
+  color: #cccccc;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.port-forward-count-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #4ec9b0;
+  color: #1e1e1e;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.current-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #007acc;
+  color: #fff;
+  border-radius: 3px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.context-tree-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.context-tree-node-header:hover .context-tree-node-actions {
+  opacity: 1;
+}
+
+.tree-refresh-button {
+  background: transparent;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.tree-refresh-button:hover {
+  background: #3e3e42;
+  color: #cccccc;
+}
+
+.tree-refresh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.context-tree-node-children {
+  padding-left: 16px;
+  margin-top: 2px;
+}
+
+.empty-namespace-state {
+  padding: 6px 10px;
+  color: #888;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.namespace-controls {
+  padding: 4px 6px;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.namespace-control-button {
+  flex: 1;
+  padding: 4px 8px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.namespace-control-button:hover {
+  background: #353535;
+  border-color: #555;
+}
+
+.namespace-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  margin-bottom: 1px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.namespace-tree-item:hover {
+  background: #2a2d2e;
+}
+
+.namespace-tree-item:hover .namespace-only-button {
+  opacity: 1;
+}
+
+.namespace-tree-item.selected {
+  background: #2a3a3a;
+}
+
+.namespace-tree-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+}
+
+.namespace-tree-icon {
+  width: 16px;
+  font-size: 14px;
+  color: #4ec9b0;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.namespace-tree-name {
+  font-size: 11px;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.namespace-tree-item.selected .namespace-tree-name {
+  color: #4ec9b0;
+  font-weight: 500;
+}
+
+.namespace-only-button {
+  padding: 3px 8px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #888;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.namespace-only-button:hover {
+  background: #007acc;
+  border-color: #007acc;
+  color: #fff;
+  opacity: 1;
+}
+

@@ -1,0 +1,139 @@
+.global-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  height: 48px;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.gnb-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.gnb-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cccccc;
+}
+
+.gnb-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.gnb-context-label {
+  color: #858585;
+}
+
+.gnb-context-value {
+  color: #4ec9b0;
+  font-weight: 500;
+}
+
+.gnb-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gnb-button {
+  padding: 6px 12px;
+  background: #3e3e42;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.gnb-button:hover:not(:disabled) {
+  background: #4a4a4a;
+  border-color: #666;
+  color: #fff;
+}
+
+.gnb-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gnb-clear-cache-button {
+  background: #3e3e42;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gnb-clear-cache-button:hover:not(:disabled) {
+  background: #4a4a4a;
+}
+
+.gnb-dropdown-arrow {
+  font-size: 8px;
+  color: #858585;
+  transition: transform 0.2s;
+}
+
+.gnb-dropdown-container {
+  position: relative;
+}
+
+.gnb-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 180px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.gnb-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: #cccccc;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.gnb-dropdown-item:hover {
+  background: #3e3e42;
+  color: #fff;
+}
+
+.gnb-dropdown-divider {
+  height: 1px;
+  background: #3e3e42;
+  margin: 4px 0;
+}
+
+.gnb-refresh-button {
+  background: #007acc;
+  border-color: #007acc;
+  color: #fff;
+}
+
+.gnb-refresh-button:hover:not(:disabled) {
+  background: #005a9e;
+  border-color: #005a9e;
+}
+
