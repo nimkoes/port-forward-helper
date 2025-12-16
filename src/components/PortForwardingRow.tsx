@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import type { ContainerPort, PortForwardConfig } from '@/types'
-import { getNamespaceDefaultPorts } from '@/utils/config'
+import { formatDomainForDisplay } from '@/utils/domain'
 import './PortForwardingRow.css'
 
 interface PortForwardingRowProps {
@@ -8,6 +8,8 @@ interface PortForwardingRowProps {
   podNamespace?: string
   podStatus?: string
   podAge?: string
+  podDeployment?: string
+  podContext?: string
   port: ContainerPort
   portForward: PortForwardConfig | null
   onPortForwardChange: (
@@ -23,69 +25,25 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
   podNamespace,
   podStatus,
   podAge,
+  podDeployment,
+  podContext,
   port,
   portForward,
   onPortForwardChange,
 }) => {
-  // 네임스페이스별 기본 포트 가져오기
-  const namespaceDefaultPorts = useMemo(() => getNamespaceDefaultPorts(), [])
-  
-  // 기본 포트 결정: 포트포워딩이 있으면 그것을 사용, 없으면 네임스페이스 기본 포트 또는 containerPort
-  const getDefaultPort = useCallback((): number => {
-    if (portForward) {
-      return portForward.localPort
-    }
-    if (podNamespace) {
-      const defaultPort = namespaceDefaultPorts.get(podNamespace)
-      if (defaultPort !== undefined) {
-        console.log(`[PortForwardingRow] 네임스페이스 "${podNamespace}"의 기본 포트 사용: ${defaultPort}`)
-        return defaultPort
-      } else {
-        console.log(`[PortForwardingRow] 네임스페이스 "${podNamespace}"에 기본 포트가 설정되지 않음, containerPort 사용: ${port.containerPort}`)
-      }
-    }
-    return port.containerPort
-  }, [portForward, podNamespace, namespaceDefaultPorts, port.containerPort])
-
-  // 초기값은 containerPort로 설정하고, useEffect에서 네임스페이스 기본 포트를 적용
-  const [localPort, setLocalPort] = useState<string>(
-    port.containerPort.toString()
-  )
   const [isEnabled, setIsEnabled] = useState(portForward?.active || false)
 
   useEffect(() => {
-    if (portForward) {
-      // 포트포워딩이 활성화되어 있으면 그 포트 사용
-      setLocalPort(portForward.localPort.toString())
-      setIsEnabled(portForward.active)
-    } else {
-      // 포트포워딩이 없으면 네임스페이스 기본 포트 또는 containerPort 사용
-      // getDefaultPort는 podNamespace를 dependency로 가지고 있어서,
-      // podNamespace가 변경되면 자동으로 최신 네임스페이스 기본 포트를 가져옴
-      const defaultPort = getDefaultPort()
-      setLocalPort(defaultPort.toString())
-      setIsEnabled(false)
-    }
-    // getDefaultPort의 dependency에 podNamespace가 포함되어 있어서,
-    // podNamespace 변경 시에도 이 useEffect가 실행됨
-  }, [portForward, getDefaultPort])
+    setIsEnabled(portForward?.active || false)
+  }, [portForward])
 
   const handleToggle = async (e: React.MouseEvent) => {
-    // input 필드 클릭 시에는 토글하지 않음
-    if ((e.target as HTMLElement).tagName === 'INPUT') {
-      return
-    }
-    
     const newEnabled = !isEnabled
     const previousEnabled = isEnabled
     setIsEnabled(newEnabled)
     
-    const localPortNum = parseInt(localPort, 10)
-    if (isNaN(localPortNum) || localPortNum <= 0) {
-      alert('Please enter a valid local port number')
-      setIsEnabled(previousEnabled)
-      return
-    }
+    // 포트포워딩이 활성화되어 있으면 localPort 사용, 없으면 remotePort를 localPort로 사용
+    const localPortNum = portForward?.localPort || port.containerPort
 
     try {
       await onPortForwardChange(podName, port.containerPort, localPortNum, newEnabled)
@@ -95,18 +53,12 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
     }
   }
 
-  const handleLocalPortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setLocalPort(value)
-    
-    // 포트포워딩이 활성화되어 있으면 업데이트
-    if (isEnabled) {
-      const localPortNum = parseInt(value, 10)
-      if (!isNaN(localPortNum) && localPortNum > 0) {
-        onPortForwardChange(podName, port.containerPort, localPortNum, true)
-      }
-    }
-  }
+  // 도메인 표시용 텍스트 생성
+  const displayDomain = portForward?.domain 
+    ? formatDomainForDisplay(portForward.domain)
+    : podDeployment && podNamespace
+    ? formatDomainForDisplay(`${podDeployment}.${podNamespace}.${podContext || ''}`)
+    : null
 
   return (
     <div 
@@ -129,21 +81,14 @@ export const PortForwardingRow: React.FC<PortForwardingRowProps> = ({
         {podAge && (
           <span className="pod-age-inline">{podAge}</span>
         )}
-        <span className="port-number-inline">{port.containerPort}</span>
+        {displayDomain && isEnabled && (
+          <span className="domain-display" title={`http://${portForward?.domain || `${podDeployment}.${podNamespace}.${podContext}`}`}>
+            🌐 {displayDomain}
+          </span>
+        )}
         {port.name && (
           <span className="port-name-inline">{port.name}</span>
         )}
-        <input
-          type="number"
-          className="local-port-input-inline"
-          value={localPort}
-          onChange={handleLocalPortChange}
-          onClick={(e) => e.stopPropagation()}
-          placeholder="Local Port"
-          min="1"
-          max="65535"
-          disabled={isEnabled}
-        />
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ import { ActivePortForwards } from './components/ActivePortForwards'
 import { useKubectl } from './hooks/useKubectl'
 import { usePortForward } from './hooks/usePortForward'
 import { getAllowedNamespaces } from './utils/config'
+import { generateDomain } from './utils/domain'
 import type { KubernetesContext, Namespace, Pod, PortForwardConfig } from './types'
 import './App.css'
 
@@ -23,6 +24,10 @@ function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [proxyServerPort, setProxyServerPort] = useState<number | null>(null)
+  const [lastHostsDomains, setLastHostsDomains] = useState<string[]>([])
+  // hosts 파일 수정은 기본적으로 비활성화 (비밀번호 요청 방지)
+  const [enableHostsModification, setEnableHostsModification] = useState(true)
 
   // 현재 활성 컨텍스트의 선택된 네임스페이스를 가져오는 헬퍼 함수
   const getVisibleNamespacesForContext = useCallback((context: string | null): Set<string> => {
@@ -252,6 +257,114 @@ function App() {
     return null
   }, [])
 
+  // 프록시 서버와 hosts 파일 업데이트 (useEffect보다 먼저 정의되어야 함)
+  const updateProxyAndHosts = useCallback(async () => {
+    if (!window.electronAPI) {
+      console.warn('[App] electronAPI not available yet')
+      return
+    }
+
+    // 모든 활성 포트포워딩 수집
+    const activeRoutes = new Map<string, number>()
+    const activeDomains: string[] = []
+
+    for (const [context, contextMap] of portForwards.entries()) {
+      for (const [namespace, namespaceMap] of contextMap.entries()) {
+        for (const [podName, podMap] of namespaceMap.entries()) {
+          for (const [remotePort, config] of podMap.entries()) {
+            if (config.active && config.domain) {
+              activeRoutes.set(config.domain, config.localPort)
+              activeDomains.push(config.domain)
+            }
+          }
+        }
+      }
+    }
+
+    // 프록시 서버 시작 (활성 포트포워딩이 있고 서버가 실행 중이 아니면)
+    if (activeRoutes.size > 0 && !proxyServerPort) {
+      try {
+        const result = await window.electronAPI.startProxyServer(80)
+        if (result.success && result.port) {
+          setProxyServerPort(result.port)
+        } else {
+          console.error('Failed to start proxy server:', result.error)
+        }
+      } catch (error) {
+        console.error('Failed to start proxy server:', error)
+      }
+    }
+
+    // 프록시 서버 라우팅 업데이트
+    if (activeRoutes.size > 0 && proxyServerPort) {
+      try {
+        const routesObj: Record<string, number> = {}
+        for (const [domain, port] of activeRoutes.entries()) {
+          routesObj[domain] = port
+        }
+        await window.electronAPI.updateProxyRoutes(routesObj)
+      } catch (error) {
+        console.error('Failed to update proxy routes:', error)
+      }
+    }
+
+    // hosts 파일 업데이트 (사용자가 활성화한 경우에만, 변경된 경우에만)
+    if (enableHostsModification) {
+      const domainsChanged = 
+        activeDomains.length !== lastHostsDomains.length ||
+        activeDomains.some((domain, index) => domain !== lastHostsDomains[index]) ||
+        lastHostsDomains.some((domain, index) => domain !== activeDomains[index])
+      
+      if (domainsChanged) {
+        try {
+          console.log('[App] Attempting to update hosts file with domains:', activeDomains)
+          const result = await window.electronAPI.updateHostsDomains(activeDomains)
+          if (result && result.success) {
+            setLastHostsDomains(activeDomains)
+            console.log('[App] Hosts file updated successfully with domains:', activeDomains)
+          } else {
+            console.error('[App] Failed to update hosts file:', result?.error || 'Unknown error')
+            alert(`Failed to update hosts file: ${result?.error || 'Unknown error'}\n\nYou may need to run the application with administrator privileges.`)
+          }
+        } catch (error) {
+          console.error('[App] Failed to update hosts file:', error)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          alert(`Failed to update hosts file: ${errorMessage}\n\nYou may need to run the application with administrator privileges.`)
+        }
+      }
+    } else {
+      // hosts 파일 수정이 비활성화되어 있으면 이전 도메인 목록 초기화
+      if (lastHostsDomains.length > 0) {
+        setLastHostsDomains([])
+      }
+    }
+
+    // 모든 포트포워딩이 비활성화되면 프록시 서버 종료
+    if (activeRoutes.size === 0 && proxyServerPort) {
+      try {
+        await window.electronAPI.stopProxyServer()
+        setProxyServerPort(null)
+      } catch (error) {
+        console.error('Failed to stop proxy server:', error)
+      }
+    }
+  }, [portForwards, proxyServerPort, lastHostsDomains, enableHostsModification])
+
+  // portForwards 변경 시 프록시 서버와 hosts 파일 자동 업데이트
+  useEffect(() => {
+    // electronAPI가 준비될 때까지 대기
+    if (!window.electronAPI) {
+      const checkAPI = setInterval(() => {
+        if (window.electronAPI) {
+          clearInterval(checkAPI)
+          updateProxyAndHosts()
+        }
+      }, 100)
+      return () => clearInterval(checkAPI)
+    }
+    updateProxyAndHosts()
+  }, [portForwards, updateProxyAndHosts])
+
   const handlePortForwardChange = useCallback(async (
     podName: string,
     remotePort: number,
@@ -260,11 +373,14 @@ function App() {
   ) => {
     if (!activeContext) return
 
-    // Pod가 속한 네임스페이스 찾기
+    // Pod 정보 찾기
     let podNamespace = ''
+    let podDeployment: string | undefined
     for (const [namespace, pods] of podsByNamespace.entries()) {
-      if (pods.some(pod => pod.name === podName)) {
+      const pod = pods.find(p => p.name === podName)
+      if (pod) {
         podNamespace = namespace
+        podDeployment = pod.deployment || podName
         break
       }
     }
@@ -289,6 +405,10 @@ function App() {
         portToUse = availablePort
       }
 
+      // 도메인 생성 (podDeployment가 없으면 podName 사용)
+      const deploymentName = podDeployment || podName
+      const domain = generateDomain(deploymentName, podNamespace, activeContext)
+
       // 포트포워딩 시작
       try {
         const pid = await startPortForward(
@@ -308,6 +428,7 @@ function App() {
           remotePort,
           pid,
           active: true,
+          domain,
         }
 
         setPortForwards(prev => {
@@ -330,7 +451,6 @@ function App() {
       } catch (error) {
         console.error('Failed to start port forward:', error)
         const errorMessage = error instanceof Error ? error.message : String(error)
-        // 중복 포트 에러는 이미 alert를 표시했으므로 다시 표시하지 않음
         if (!errorMessage.includes('already in use')) {
           alert(`Failed to start port forward: ${errorMessage}`)
         }
@@ -372,95 +492,8 @@ function App() {
         }
       }
     }
-  }, [activeContext, podsByNamespace, portForwards, activeLocalPorts, findAvailablePort, startPortForward, stopPortForward])
+  }, [activeContext, podsByNamespace, portForwards, activeLocalPorts, findAvailablePort, startPortForward, stopPortForward, updateProxyAndHosts])
 
-  // 포트 변경 핸들러 (기존 포트포워딩 삭제 후 새 포트로 재생성)
-  const handleLocalPortUpdate = useCallback(async (
-    context: string,
-    namespace: string,
-    podName: string,
-    remotePort: number,
-    oldLocalPort: number,
-    newLocalPort: number
-  ) => {
-    // 포트 중복 체크
-    if (activeLocalPorts.has(newLocalPort) && newLocalPort !== oldLocalPort) {
-      alert(`Port ${newLocalPort} is already in use`)
-      return
-    }
-
-    // 컨텍스트가 다른 경우 컨텍스트 전환
-    if (activeContext !== context && handleContextChange) {
-      handleContextChange(context)
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
-
-    // 기존 포트포워딩 중지
-    const contextMap = portForwards.get(context)
-    const namespaceMap = contextMap?.get(namespace)
-    const podMap = namespaceMap?.get(podName)
-    const config = podMap?.get(remotePort)
-
-    if (config?.pid) {
-      try {
-        await stopPortForward(config.pid)
-        
-        // 포트포워딩 상태에서 제거
-        setPortForwards(prev => {
-          const newMap = new Map(prev)
-          const ctxMap = newMap.get(context)
-          const nsMap = ctxMap?.get(namespace)
-          const pMap = nsMap?.get(podName)
-          if (pMap) {
-            pMap.delete(remotePort)
-          }
-          return newMap
-        })
-
-        // 새 포트로 포트포워딩 재시작
-        await new Promise(resolve => setTimeout(resolve, 100))
-        const pid = await startPortForward(
-          context,
-          namespace,
-          podName,
-          newLocalPort,
-          remotePort
-        )
-
-        const newConfig: PortForwardConfig = {
-          id: `${context}:${namespace}:${podName}:${remotePort}`,
-          context,
-          namespace,
-          pod: podName,
-          localPort: newLocalPort,
-          remotePort,
-          pid,
-          active: true,
-        }
-
-        setPortForwards(prev => {
-          const newMap = new Map(prev)
-          if (!newMap.has(context)) {
-            newMap.set(context, new Map())
-          }
-          const ctxMap = newMap.get(context)!
-          if (!ctxMap.has(namespace)) {
-            ctxMap.set(namespace, new Map())
-          }
-          const nsMap = ctxMap.get(namespace)!
-          if (!nsMap.has(podName)) {
-            nsMap.set(podName, new Map())
-          }
-          const pMap = nsMap.get(podName)!
-          pMap.set(remotePort, newConfig)
-          return newMap
-        })
-      } catch (error) {
-        console.error('Failed to update port:', error)
-        alert(`Failed to update port: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-  }, [activeContext, portForwards, activeLocalPorts, startPortForward, stopPortForward, handleContextChange])
 
   // 현재 컨텍스트의 보이는 네임스페이스의 Pod 목록
   const visiblePods = React.useMemo(() => {
@@ -671,6 +704,7 @@ function App() {
             <PodList
               pods={visiblePods}
               portForwards={currentPortForwards}
+              activeContext={activeContext}
               onPortForwardChange={handlePortForwardChange}
             />
           )}
@@ -681,7 +715,6 @@ function App() {
           activeContext={activeContext}
           activeLocalPorts={activeLocalPorts}
           onPortForwardChange={handlePortForwardChange}
-          onLocalPortUpdate={handleLocalPortUpdate}
           onContextChange={handleContextChange}
           onItemClick={handleScrollToPortForward}
           onDisableAll={handleDisableAllPortForwards}

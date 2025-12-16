@@ -17,6 +17,36 @@ try {
     
     // 실행 중인 포트포워딩 목록 조회
     getActivePortForwards: () => ipcRenderer.invoke('get-active-port-forwards'),
+    
+    // 프록시 서버 시작
+    startProxyServer: (preferredPort?: number) => ipcRenderer.invoke('start-proxy-server', preferredPort),
+    
+    // 프록시 서버 중지
+    stopProxyServer: () => ipcRenderer.invoke('stop-proxy-server'),
+    
+    // 프록시 서버 라우팅 업데이트
+    updateProxyRoutes: (routes: Record<string, number>) => ipcRenderer.invoke('update-proxy-routes', routes),
+    
+    // 프록시 서버 포트 조회
+    getProxyServerPort: () => ipcRenderer.invoke('get-proxy-server-port'),
+    
+    // hosts 파일에 도메인 추가
+    addHostsDomain: (domain: string) => ipcRenderer.invoke('add-hosts-domain', domain),
+    
+    // hosts 파일에서 도메인 제거
+    removeHostsDomain: (domain: string) => ipcRenderer.invoke('remove-hosts-domain', domain),
+    
+    // hosts 파일 도메인 목록 업데이트
+    updateHostsDomains: (domains: string[]) => ipcRenderer.invoke('update-hosts-domains', domains),
+    
+    // Kubernetes Client로 컨텍스트 목록 조회
+    getK8sContexts: () => ipcRenderer.invoke('get-k8s-contexts'),
+    
+    // Kubernetes Client로 네임스페이스 목록 조회
+    getK8sNamespaces: (context: string) => ipcRenderer.invoke('get-k8s-namespaces', context),
+    
+    // Kubernetes Client로 Pod 목록 조회
+    getK8sPods: (context: string, namespace: string) => ipcRenderer.invoke('get-k8s-pods', context, namespace),
   })
   console.log('[Preload] electronAPI exposed successfully')
 } catch (error) {

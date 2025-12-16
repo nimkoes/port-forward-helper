@@ -12,7 +12,7 @@
 
 .app-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: #fff;
   white-space: nowrap;
@@ -40,7 +40,8 @@
   border-radius: 6px;
   color: #ccc;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
   transition: all 0.2s;
 }
 
@@ -60,7 +61,7 @@
 }
 
 .current-badge {
-  font-size: 8px;
+  font-size: 10px;
   padding: 2px 6px;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
@@ -99,6 +100,6 @@
 .no-contexts-message {
   padding: 8px 16px;
   color: #888;
-  font-size: 11px;
+  font-size: 13px;
 }
 

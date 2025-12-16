@@ -17,14 +17,6 @@ interface ActivePortForwardsProps {
     localPort: number,
     enabled: boolean
   ) => void
-  onLocalPortUpdate?: (
-    context: string,
-    namespace: string,
-    podName: string,
-    remotePort: number,
-    oldLocalPort: number,
-    newLocalPort: number
-  ) => void
   onContextChange?: (context: string) => void
   onItemClick?: (
     context: string,
@@ -41,14 +33,12 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
   activeContext,
   activeLocalPorts,
   onPortForwardChange,
-  onLocalPortUpdate,
   onContextChange,
   onItemClick,
   onDisableAll,
 }) => {
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null)
-  const [editingItemId, setEditingItemId] = React.useState<string | null>(null)
-  const [editingPortValue, setEditingPortValue] = React.useState<string>('')
+  const [copiedDomainId, setCopiedDomainId] = React.useState<string | null>(null)
   // 모든 활성 포트포워딩 정보 수집
   const activePortForwards = React.useMemo<ActivePortForwardItem[]>(() => {
     const items: ActivePortForwardItem[] = []
@@ -156,93 +146,41 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
             <div className="active-port-forward-pod">
               {item.pod}
             </div>
-            <div className="active-port-forward-ports">
-              {editingItemId === item.id ? (
-                <input
-                  type="number"
-                  className="active-port-forward-local-port-input"
-                  value={editingPortValue}
-                  onChange={(e) => setEditingPortValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      const newPort = parseInt(editingPortValue, 10)
-                      if (!isNaN(newPort) && newPort > 0 && newPort <= 65535) {
-                        // 중복 체크 (자신의 기존 포트는 제외)
-                        if (activeLocalPorts && activeLocalPorts.has(newPort) && newPort !== item.localPort) {
-                          alert(`Port ${newPort} is already in use`)
-                          setEditingPortValue(item.localPort.toString())
-                          setEditingItemId(null)
-                          return
-                        }
-                        if (onLocalPortUpdate) {
-                          onLocalPortUpdate(
-                            item.context,
-                            item.namespace,
-                            item.pod,
-                            item.remotePort,
-                            item.localPort,
-                            newPort
-                          )
-                        }
-                        setEditingItemId(null)
-                      } else {
-                        alert('Please enter a valid port number (1-65535)')
-                        setEditingPortValue(item.localPort.toString())
-                        setEditingItemId(null)
-                      }
-                    } else if (e.key === 'Escape') {
-                      setEditingPortValue(item.localPort.toString())
-                      setEditingItemId(null)
-                    }
-                  }}
-                  onBlur={() => {
-                    const newPort = parseInt(editingPortValue, 10)
-                    if (!isNaN(newPort) && newPort > 0 && newPort <= 65535) {
-                      // 중복 체크 (자신의 기존 포트는 제외)
-                      if (activeLocalPorts && activeLocalPorts.has(newPort) && newPort !== item.localPort) {
-                        alert(`Port ${newPort} is already in use`)
-                        setEditingPortValue(item.localPort.toString())
-                        setEditingItemId(null)
-                        return
-                      }
-                      if (onLocalPortUpdate && newPort !== item.localPort) {
-                        onLocalPortUpdate(
-                          item.context,
-                          item.namespace,
-                          item.pod,
-                          item.remotePort,
-                          item.localPort,
-                          newPort
-                        )
-                      }
-                    } else {
-                      setEditingPortValue(item.localPort.toString())
-                    }
-                    setEditingItemId(null)
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  autoFocus
-                  min="1"
-                  max="65535"
-                />
-              ) : (
-                <span
-                  className="active-port-forward-local-port"
-                  onClick={(e) => {
+            {item.domain && (
+              <div className="active-port-forward-domain-container">
+                <div className="active-port-forward-domain" title={`http://${item.domain}`}>
+                  🌐 {item.domain}
+                </div>
+                <button
+                  className="active-port-forward-copy-button"
+                  onClick={async (e) => {
                     e.stopPropagation()
-                    setEditingItemId(item.id)
-                    setEditingPortValue(item.localPort.toString())
+                    const url = `http://${item.domain}`
+                    try {
+                      await navigator.clipboard.writeText(url)
+                      setCopiedDomainId(item.id)
+                      setTimeout(() => {
+                        setCopiedDomainId(null)
+                      }, 2000)
+                    } catch (err) {
+                      console.error('Failed to copy domain:', err)
+                    }
                   }}
-                  style={{ cursor: 'pointer' }}
-                  title="Click to edit port"
+                  title="Copy domain to clipboard"
                 >
-                  {item.localPort}
-                </span>
-              )}
-              <span className="active-port-forward-arrow">→</span>
-              <span className="active-port-forward-remote-port">{item.remotePort}</span>
-            </div>
+                  {copiedDomainId === item.id ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -6,6 +6,7 @@ import './PodList.css'
 interface PodListProps {
   pods: Pod[]
   portForwards: Map<string, Map<number, PortForwardConfig>>
+  activeContext?: string | null
   onPortForwardChange: (
     podName: string,
     remotePort: number,
@@ -17,6 +18,7 @@ interface PodListProps {
 export const PodList: React.FC<PodListProps> = ({
   pods,
   portForwards,
+  activeContext,
   onPortForwardChange,
 }) => {
   if (pods.length === 0) {
@@ -91,6 +93,8 @@ export const PodList: React.FC<PodListProps> = ({
               podNamespace={pod.namespace}
               podStatus={pod.status}
               podAge={pod.age}
+              podDeployment={pod.deployment}
+              podContext={activeContext || undefined}
               port={port}
               portForward={portForward}
               onPortForwardChange={onPortForwardChange}

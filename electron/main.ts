@@ -1,9 +1,14 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
-import { spawn, exec, ChildProcess } from 'child_process'
+import { exec, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
+import { KubeConfig, CoreV1Api, PortForward } from '@kubernetes/client-node'
+import net from 'net'
+import portfinder from 'portfinder'
+import * as proxyServer from './proxy-server'
+import { HostsManager } from './hosts-manager'
 
 const execAsync = promisify(exec)
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
@@ -12,6 +17,28 @@ let mainWindow: BrowserWindow | null = null
 
 // 포트포워딩 프로세스 추적
 const portForwardProcesses = new Map<number, ChildProcess>()
+
+// Hosts 매니저 인스턴스
+const hostsManager = new HostsManager()
+
+// Kubernetes Client 인스턴스 (컨텍스트별로 관리)
+const kubeConfigs = new Map<string, { kc: KubeConfig; k8sApi: CoreV1Api; forwarder: PortForward }>()
+
+// 포트포워딩 서버 추적 (Kubernetes Client 사용)
+const portForwardServers = new Map<number, net.Server>()
+
+// Kubernetes Client 초기화
+function getKubeClient(context: string) {
+  if (!kubeConfigs.has(context)) {
+    const kc = new KubeConfig()
+    kc.loadFromDefault()
+    kc.setCurrentContext(context)
+    const k8sApi = kc.makeApiClient(CoreV1Api)
+    const forwarder = new PortForward(kc)
+    kubeConfigs.set(context, { kc, k8sApi, forwarder })
+  }
+  return kubeConfigs.get(context)!
+}
 
 function createWindow() {
   const isDev = process.env.NODE_ENV === 'development'
@@ -88,7 +115,7 @@ function createWindow() {
   })
 }
 
-// kubectl 명령어 실행
+// kubectl 명령어 실행 (하위 호환성을 위해 유지)
 ipcMain.handle('exec-kubectl', async (_, args: string[]) => {
   try {
     const command = `kubectl ${args.join(' ')}`
@@ -106,7 +133,169 @@ ipcMain.handle('exec-kubectl', async (_, args: string[]) => {
   }
 })
 
-// 포트포워딩 시작
+// Kubernetes Client로 컨텍스트 목록 조회
+ipcMain.handle('get-k8s-contexts', async () => {
+  try {
+    const kc = new KubeConfig()
+    kc.loadFromDefault()
+    const contexts = kc.getContexts()
+    const currentContext = kc.getCurrentContext()
+    
+    return {
+      success: true,
+      contexts: contexts.map((ctx: any) => ({
+        name: ctx.name || '',
+        cluster: ctx.cluster || '',
+        authInfo: ctx.user || '',
+        namespace: ctx.namespace,
+        current: ctx.name === currentContext,
+      })),
+      error: null,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      contexts: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// Kubernetes Client로 네임스페이스 목록 조회
+ipcMain.handle('get-k8s-namespaces', async (_, context: string) => {
+  try {
+    const { k8sApi } = getKubeClient(context)
+    const res = await k8sApi.listNamespace()
+    
+    const namespaces = (res.body.items || []).map((item: any) => {
+      const creationTimestamp = item.metadata?.creationTimestamp
+      const age = creationTimestamp
+        ? calculateAge(creationTimestamp)
+        : 'Unknown'
+      
+      return {
+        name: item.metadata?.name || '',
+        status: item.status?.phase || 'Unknown',
+        age,
+      }
+    })
+
+    return {
+      success: true,
+      namespaces: namespaces.filter((ns: any) => ns.name.length > 0),
+      error: null,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      namespaces: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// Kubernetes Client로 Pod 목록 조회
+ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => {
+  try {
+    const { k8sApi } = getKubeClient(context)
+    const res = await k8sApi.listNamespacedPod(namespace)
+    
+    const pods = []
+    for (const item of res.body.items || []) {
+      const podName = item.metadata?.name || ''
+      if (!podName) continue
+
+      const status = item.status?.phase || 'Unknown'
+      const creationTimestamp = item.metadata?.creationTimestamp
+      const age = creationTimestamp
+        ? calculateAge(creationTimestamp)
+        : 'Unknown'
+
+      // 컨테이너 포트 정보 추출
+      const ports = []
+      const containers = item.spec?.containers || []
+      for (const container of containers) {
+        const containerPorts = container.ports || []
+        for (const port of containerPorts) {
+          ports.push({
+            name: port.name || undefined,
+            containerPort: port.containerPort,
+            protocol: port.protocol || 'TCP',
+          })
+        }
+      }
+
+      // Deployment 이름 추출
+      const deployment = extractDeploymentName(item)
+
+      pods.push({
+        name: podName,
+        namespace,
+        status,
+        age,
+        ports,
+        deployment,
+      })
+    }
+
+    return {
+      success: true,
+      pods,
+      error: null,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      pods: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// 유틸리티 함수들
+function calculateAge(creationTimestamp: string): string {
+  try {
+    const created = new Date(creationTimestamp).getTime()
+    const now = Date.now()
+    const diffMs = now - created
+    const diffSecs = Math.floor(diffMs / 1000)
+    const diffMins = Math.floor(diffSecs / 60)
+    const diffHours = Math.floor(diffMins / 60)
+    const diffDays = Math.floor(diffHours / 24)
+
+    if (diffDays > 0) return `${diffDays}d`
+    if (diffHours > 0) return `${diffHours}h`
+    if (diffMins > 0) return `${diffMins}m`
+    return `${diffSecs}s`
+  } catch {
+    return 'Unknown'
+  }
+}
+
+function extractDeploymentName(podItem: any): string {
+  try {
+    const ownerReferences = podItem.metadata?.ownerReferences || []
+    
+    // ReplicaSet 찾기
+    for (const owner of ownerReferences) {
+      if (owner.kind === 'ReplicaSet') {
+        // ReplicaSet의 이름에서 Deployment 이름 추출
+        const replicaSetName = owner.name || ''
+        const lastDashIndex = replicaSetName.lastIndexOf('-')
+        if (lastDashIndex > 0) {
+          return replicaSetName.substring(0, lastDashIndex)
+        }
+      }
+    }
+    
+    // Deployment를 찾지 못했으면 Pod 이름 사용
+    return podItem.metadata?.name || ''
+  } catch (error) {
+    return podItem.metadata?.name || ''
+  }
+}
+
+// 포트포워딩 시작 (Kubernetes Client 사용)
 ipcMain.handle('start-port-forward', async (_, config: {
   context: string
   namespace: string
@@ -115,40 +304,38 @@ ipcMain.handle('start-port-forward', async (_, config: {
   remotePort: number
 }) => {
   try {
-    const args = [
-      '--context', config.context,
-      'port-forward',
-      `-n`, config.namespace,
-      `pod/${config.pod}`,
-      `${config.localPort}:${config.remotePort}`
-    ]
-
-    const process = spawn('kubectl', args, {
-      stdio: 'pipe',
-      detached: false,
-    })
-
-    const pid = process.pid
-    if (!pid) {
-      throw new Error('포트포워딩 프로세스 시작 실패')
+    const { forwarder } = getKubeClient(config.context)
+    
+    // portfinder로 사용 가능한 포트 찾기 (지정된 포트가 사용 중일 수 있음)
+    let targetLocalPort = config.localPort
+    try {
+      // 지정된 포트가 사용 가능한지 확인
+      await portfinder.getPortPromise({ port: config.localPort })
+    } catch {
+      // 사용 불가능하면 자동으로 사용 가능한 포트 찾기
+      targetLocalPort = await portfinder.getPortPromise()
     }
 
-    portForwardProcesses.set(pid, process)
-
-    // 프로세스 종료 시 맵에서 제거
-    process.on('exit', () => {
-      portForwardProcesses.delete(pid)
+    // net.Server를 생성하여 포트포워딩
+    const server = net.createServer((socket) => {
+      forwarder.portForward(config.namespace, config.pod, [config.remotePort], socket, null, socket)
     })
 
-    // 에러 처리
-    process.stderr?.on('data', (data) => {
-      const error = data.toString()
-      if (error.includes('error') || error.includes('Error')) {
-        portForwardProcesses.delete(pid)
-      }
-    })
+    return new Promise((resolve, reject) => {
+      server.listen(targetLocalPort, () => {
+        console.log(`[Main] Forwarding 127.0.0.1:${targetLocalPort} -> ${config.context}/${config.namespace}/${config.pod}:${config.remotePort}`)
+        // 서버를 추적하기 위해 포트를 키로 사용
+        portForwardServers.set(targetLocalPort, server)
+        
+        // 실제 PID는 없지만, 포트를 PID처럼 사용
+        resolve({ success: true, pid: targetLocalPort, error: null })
+      })
 
-    return { success: true, pid, error: null }
+      server.on('error', (err) => {
+        console.error('[Main] Port forward server error:', err)
+        reject(err)
+      })
+    })
   } catch (error: any) {
     return { 
       success: false, 
@@ -161,6 +348,19 @@ ipcMain.handle('start-port-forward', async (_, config: {
 // 포트포워딩 중지
 ipcMain.handle('stop-port-forward', async (_, pid: number) => {
   try {
+    // Kubernetes Client로 생성된 서버인지 확인
+    const server = portForwardServers.get(pid)
+    if (server) {
+      return new Promise((resolve) => {
+        server.close(() => {
+          portForwardServers.delete(pid)
+          console.log(`[Main] Stopped port forward on port ${pid}`)
+          resolve({ success: true, error: null })
+        })
+      })
+    }
+    
+    // 기존 kubectl 프로세스 방식 (하위 호환성)
     const childProcess = portForwardProcesses.get(pid)
     if (childProcess) {
       childProcess.kill()
@@ -168,12 +368,6 @@ ipcMain.handle('stop-port-forward', async (_, pid: number) => {
       return { success: true, error: null }
     } else {
       // 프로세스가 맵에 없으면 이미 종료된 것으로 간주
-      // 시스템 kill 명령어로 시도
-      try {
-        await execAsync(`kill ${pid}`)
-      } catch {
-        // 프로세스가 이미 종료된 경우 무시
-      }
       return { success: true, error: null }
     }
   } catch (error: any) {
@@ -186,11 +380,119 @@ ipcMain.handle('stop-port-forward', async (_, pid: number) => {
 
 // 실행 중인 포트포워딩 목록 조회
 ipcMain.handle('get-active-port-forwards', async () => {
-  const activeForwards = Array.from(portForwardProcesses.entries()).map(([pid, process]) => ({
+  // kubectl 프로세스 방식 (하위 호환성)
+  const kubectlForwards = Array.from(portForwardProcesses.entries()).map(([pid, process]) => ({
     pid,
     killed: process.killed,
   }))
-  return { success: true, forwards: activeForwards }
+  
+  // Kubernetes Client 서버 방식
+  const k8sClientForwards = Array.from(portForwardServers.entries()).map(([port, server]) => ({
+    pid: port, // 포트를 PID처럼 사용
+    killed: !server.listening,
+  }))
+  
+  return { success: true, forwards: [...kubectlForwards, ...k8sClientForwards] }
+})
+
+// 프록시 서버 시작
+ipcMain.handle('start-proxy-server', async (_, preferredPort?: number) => {
+  try {
+    const port = await proxyServer.startProxyServer(preferredPort || 80)
+    return { success: true, port, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      port: null, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// 프록시 서버 중지
+ipcMain.handle('stop-proxy-server', async () => {
+  try {
+    await proxyServer.stopProxyServer()
+    return { success: true, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// 프록시 서버 라우팅 업데이트
+ipcMain.handle('update-proxy-routes', async (_, routes: Record<string, number>) => {
+  try {
+    const routesMap = new Map<string, number>()
+    for (const [domain, port] of Object.entries(routes)) {
+      routesMap.set(domain, port)
+    }
+    proxyServer.updateRoutes(routesMap)
+    return { success: true, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// 프록시 서버 포트 조회
+ipcMain.handle('get-proxy-server-port', async () => {
+  try {
+    const port = proxyServer.getServerPort()
+    return { success: true, port, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      port: null, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// hosts 파일에 도메인 추가
+ipcMain.handle('add-hosts-domain', async (_, domain: string) => {
+  try {
+    await hostsManager.addDomain(domain)
+    return { success: true, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// hosts 파일에서 도메인 제거
+ipcMain.handle('remove-hosts-domain', async (_, domain: string) => {
+  try {
+    await hostsManager.removeDomain(domain)
+    return { success: true, error: null }
+  } catch (error: any) {
+    return { 
+      success: false, 
+      error: error.message || String(error) 
+    }
+  }
+})
+
+// hosts 파일 도메인 목록 업데이트
+ipcMain.handle('update-hosts-domains', async (_, domains: string[]) => {
+  try {
+    console.log('[Main] update-hosts-domains called with domains:', domains)
+    await hostsManager.updateDomains(domains)
+    console.log('[Main] update-hosts-domains succeeded')
+    return { success: true, error: null }
+  } catch (error: any) {
+    console.error('[Main] update-hosts-domains failed:', error)
+    return { 
+      success: false, 
+      error: error.message || String(error) 
+    }
+  }
 })
 
 app.whenReady().then(() => {
@@ -203,23 +505,99 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('window-all-closed', () => {
-  // 모든 포트포워딩 프로세스 종료
-  portForwardProcesses.forEach((process) => {
-    process.kill()
-  })
-  portForwardProcesses.clear()
+// cleanup이 실행 중인지 추적
+let isCleaningUp = false
 
+// 정리 함수
+const cleanup = async () => {
+  if (isCleaningUp) {
+    console.log('[Main] Cleanup already in progress, skipping...')
+    return
+  }
+  
+  isCleaningUp = true
+  console.log('[Main] Shutting down...')
+  
+  try {
+    // 모든 포트포워딩 프로세스 종료 (kubectl 방식)
+    portForwardProcesses.forEach((process) => {
+      try {
+        process.kill()
+      } catch (error) {
+        // 무시
+      }
+    })
+    portForwardProcesses.clear()
+
+    // 모든 포트포워딩 서버 종료 (Kubernetes Client 방식)
+    for (const [port, server] of portForwardServers.entries()) {
+      try {
+        await new Promise<void>((resolve) => {
+          server.close(() => {
+            console.log(`[Main] Closed port forward server on port ${port}`)
+            resolve()
+          })
+        })
+      } catch (error) {
+        // 무시
+      }
+    }
+    portForwardServers.clear()
+
+    // 프록시 서버 종료
+    try {
+      await proxyServer.stopProxyServer()
+    } catch (error) {
+      // 무시
+    }
+
+    // hosts 파일 정리 (에러가 발생해도 앱 종료는 계속 진행)
+    try {
+      await hostsManager.cleanup()
+    } catch (error) {
+      console.error('[Main] Failed to cleanup hosts (non-fatal):', error)
+      // 에러가 발생해도 앱 종료는 계속 진행
+    }
+  } catch (error) {
+    console.error('[Main] Error during cleanup:', error)
+    // cleanup 중 에러가 발생해도 앱 종료는 계속 진행
+  } finally {
+    isCleaningUp = false
+  }
+}
+
+app.on('window-all-closed', async () => {
+  await cleanup()
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
-app.on('before-quit', () => {
-  // 앱 종료 전 모든 포트포워딩 프로세스 종료
-  portForwardProcesses.forEach((process) => {
-    process.kill()
-  })
-  portForwardProcesses.clear()
+app.on('before-quit', async () => {
+  await cleanup()
+})
+
+process.on('SIGINT', async () => {
+  await cleanup()
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  await cleanup()
+  process.exit(0)
+})
+
+process.on('uncaughtException', async (err) => {
+  console.error('[Main] Uncaught exception:', err)
+  // cleanup이 실패해도 앱은 종료되어야 함
+  try {
+    await cleanup()
+  } catch (cleanupError) {
+    console.error('[Main] Error during cleanup after uncaught exception:', cleanupError)
+  }
+  // cleanup 완료 여부와 관계없이 앱 종료
+  setTimeout(() => {
+    process.exit(1)
+  }, 1000)
 })
 

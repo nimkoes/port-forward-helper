@@ -17,7 +17,7 @@
 
 .active-port-forwards-header h2 {
   margin: 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   color: #ccc;
 }
@@ -29,7 +29,7 @@
 }
 
 .active-port-forwards-disable-all-button {
-  font-size: 9px;
+  font-size: 11px;
   padding: 4px 8px;
   background: #2d2d2d;
   border: 1px solid #444;
@@ -37,6 +37,7 @@
   color: #ccc;
   cursor: pointer;
   transition: all 0.2s;
+  font-weight: 500;
 }
 
 .active-port-forwards-disable-all-button:hover {
@@ -46,7 +47,7 @@
 }
 
 .active-count {
-  font-size: 9px;
+  font-size: 11px;
   color: #888;
   background: #2d2d2d;
   padding: 2px 8px;
@@ -63,7 +64,7 @@
   padding: 16px;
   text-align: center;
   color: #888;
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .active-port-forward-item {
@@ -119,64 +120,70 @@
   background: #2d2d2d;
   border: 1px solid #444;
   border-radius: 12px;
-  font-size: 9px;
+  font-size: 10px;
   color: #ccc;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .active-port-forward-pod {
-  font-size: 10px;
+  font-size: 13px;
   color: #ccc;
   font-weight: 500;
   margin-bottom: 6px;
   word-break: break-word;
 }
 
-.active-port-forward-ports {
+.active-port-forward-domain-container {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
-.active-port-forward-local-port {
+.active-port-forward-domain {
+  font-size: 13px;
   color: #007acc;
-  font-weight: 600;
-  user-select: none;
+  font-weight: 500;
+  word-break: break-word;
+  cursor: pointer;
   transition: opacity 0.2s;
+  flex: 1;
 }
 
-.active-port-forward-local-port:hover {
+.active-port-forward-domain:hover {
   opacity: 0.8;
   text-decoration: underline;
 }
 
-.active-port-forward-local-port-input {
-  width: 60px;
-  padding: 2px 6px;
+.active-port-forward-copy-button {
   background: #2d2d2d;
-  border: 1px solid #007acc;
+  border: 1px solid #444;
   border-radius: 4px;
-  color: #007acc;
-  font-size: 10px;
-  font-weight: 600;
-  text-align: center;
-  outline: none;
-}
-
-.active-port-forward-local-port-input:focus {
-  border-color: #007acc;
-  box-shadow: 0 0 4px rgba(0, 122, 204, 0.5);
-}
-
-.active-port-forward-arrow {
-  color: #888;
-  font-size: 12px;
-}
-
-.active-port-forward-remote-port {
   color: #ccc;
-  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+}
+
+.active-port-forward-copy-button:hover {
+  background: #353535;
+  border-color: #555;
+  color: #007acc;
+}
+
+.active-port-forward-copy-button:active {
+  transform: scale(0.95);
+}
+
+.active-port-forward-copy-button svg {
+  width: 14px;
+  height: 14px;
 }
 

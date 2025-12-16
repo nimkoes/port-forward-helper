@@ -13,7 +13,22 @@ export async function getContexts(): Promise<KubernetesContext[]> {
     throw new Error('Electron API가 사용할 수 없습니다. Electron 환경에서 실행해주세요.')
   }
 
-  // kubectl config get-contexts 출력 파싱
+  // Kubernetes Client를 사용하여 컨텍스트 조회
+  if (window.electronAPI.getK8sContexts) {
+    try {
+      const result = await window.electronAPI.getK8sContexts()
+      if (result.success) {
+        return result.contexts
+      } else {
+        throw new Error(result.error || '컨텍스트 조회 실패')
+      }
+    } catch (error: any) {
+      console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
+      // Fallback to kubectl command
+    }
+  }
+
+  // Fallback: kubectl 명령어 사용
   const result = await window.electronAPI.execKubectl(['config', 'get-contexts'])
   
   if (!result.success || !result.output) {
@@ -63,6 +78,22 @@ export async function getNamespaces(context: string): Promise<Namespace[]> {
     throw new Error('Electron API가 사용할 수 없습니다')
   }
 
+  // Kubernetes Client를 사용하여 네임스페이스 조회
+  if (window.electronAPI.getK8sNamespaces) {
+    try {
+      const result = await window.electronAPI.getK8sNamespaces(context)
+      if (result.success) {
+        return result.namespaces
+      } else {
+        throw new Error(result.error || '네임스페이스 조회 실패')
+      }
+    } catch (error: any) {
+      console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
+      // Fallback to kubectl command
+    }
+  }
+
+  // Fallback: kubectl 명령어 사용
   const result = await window.electronAPI.execKubectl([
     '--context', context,
     'get', 'namespaces',
@@ -92,6 +123,22 @@ export async function getPods(context: string, namespace: string): Promise<Pod[]
     throw new Error('Electron API가 사용할 수 없습니다')
   }
 
+  // Kubernetes Client를 사용하여 Pod 조회
+  if (window.electronAPI.getK8sPods) {
+    try {
+      const result = await window.electronAPI.getK8sPods(context, namespace)
+      if (result.success) {
+        return result.pods
+      } else {
+        throw new Error(result.error || 'Pod 조회 실패')
+      }
+    } catch (error: any) {
+      console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
+      // Fallback to kubectl command
+    }
+  }
+
+  // Fallback: kubectl 명령어 사용
   const result = await window.electronAPI.execKubectl([
     '--context', context,
     'get', 'pods',
@@ -131,12 +178,16 @@ export async function getPods(context: string, namespace: string): Promise<Pod[]
         }
       }
 
+      // Deployment 이름 추출
+      const deployment = extractDeploymentName(item)
+
       pods.push({
         name: podName,
         namespace,
         status,
         age,
         ports,
+        deployment,
       })
     }
 
@@ -167,3 +218,35 @@ function calculateAge(creationTimestamp?: string): string {
   }
 }
 
+/**
+ * Pod의 metadata에서 Deployment 이름을 추출합니다.
+ * ownerReferences를 통해 ReplicaSet을 찾고, ReplicaSet의 ownerReferences에서 Deployment를 찾습니다.
+ * Deployment를 찾지 못하면 Pod 이름을 반환합니다.
+ */
+function extractDeploymentName(podItem: any): string {
+  try {
+    const ownerReferences = podItem.metadata?.ownerReferences || []
+    
+    // ReplicaSet 찾기
+    for (const owner of ownerReferences) {
+      if (owner.kind === 'ReplicaSet') {
+        // ReplicaSet의 이름에서 Deployment 이름 추출
+        // ReplicaSet 이름 형식: <deployment-name>-<hash>
+        const replicaSetName = owner.name || ''
+        // 마지막 하이픈을 기준으로 분리하여 Deployment 이름 추출
+        const lastDashIndex = replicaSetName.lastIndexOf('-')
+        if (lastDashIndex > 0) {
+          const deploymentName = replicaSetName.substring(0, lastDashIndex)
+          return deploymentName
+        }
+      }
+    }
+    
+    // ReplicaSet을 찾지 못했거나 이름 형식이 예상과 다를 경우
+    // Pod 이름을 deployment로 사용
+    return podItem.metadata?.name || ''
+  } catch (error) {
+    // 에러 발생 시 Pod 이름 반환
+    return podItem.metadata?.name || ''
+  }
+}

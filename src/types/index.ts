@@ -24,6 +24,7 @@ export interface Pod {
   status: string
   age: string
   ports: ContainerPort[]
+  deployment?: string
 }
 
 export interface PortForwardConfig {
@@ -35,6 +36,7 @@ export interface PortForwardConfig {
   remotePort: number
   pid?: number
   active: boolean
+  domain?: string
 }
 
 export interface PortForwardState {
