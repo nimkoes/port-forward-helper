@@ -33,8 +33,8 @@ npm install
 SUDO_PASSWORD=your_password
 
 # 네임스페이스별 기본 포트 설정 (선택사항)
-# 형식: 네임스페이스명:포트번호 (쉼표로 구분)
-VITE_ALLOWED_NAMESPACES=ov:8080,platform:9090
+# 형식: 네임스페이스명 (쉼표로 구분)
+VITE_ALLOWED_NAMESPACES=ov,platform
 ```
 
 ### 실행
