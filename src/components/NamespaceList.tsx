@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import type { Namespace } from '@/types'
-import { getAllowedNamespaces } from '@/utils/config'
 import './NamespaceList.css'
 
 interface NamespaceListProps {
@@ -12,8 +11,8 @@ interface NamespaceListProps {
   onSelectOnly: (namespace: string) => void
 }
 
-// 표시할 네임스페이스 목록 (환경 변수에서 읽어옴)
-const ALLOWED_NAMESPACES = getAllowedNamespaces()
+// 시스템 namespace 목록 (제외 대상)
+const SYSTEM_NAMESPACES = ['kube-system', 'kube-public', 'kube-node-lease']
 
 export const NamespaceList: React.FC<NamespaceListProps> = ({
   namespaces,
@@ -24,16 +23,17 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
   onSelectOnly,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true)
-  const allowedNamespaces = namespaces.filter(ns => ALLOWED_NAMESPACES.has(ns.name))
-  const allSelected = allowedNamespaces.length > 0 && allowedNamespaces.every(ns => visibleNamespaces.has(ns.name))
-  const someSelected = allowedNamespaces.some(ns => visibleNamespaces.has(ns.name))
+  // 시스템 namespace 제외하고 필터링
+  const filteredNamespaces = namespaces.filter(ns => !SYSTEM_NAMESPACES.includes(ns.name))
+  const allSelected = filteredNamespaces.length > 0 && filteredNamespaces.every(ns => visibleNamespaces.has(ns.name))
+  const someSelected = filteredNamespaces.some(ns => visibleNamespaces.has(ns.name))
 
   return (
     <div className={`namespace-list ${isExpanded ? 'expanded' : 'collapsed'}`}>
       <div className="namespace-list-header">
         <h2>namespace</h2>
         <div className="namespace-header-right">
-          <span className="namespace-count">{allowedNamespaces.length}</span>
+          <span className="namespace-count">{filteredNamespaces.length}</span>
           <button
             className="namespace-collapse-button"
             onClick={() => setIsExpanded(!isExpanded)}
@@ -62,12 +62,11 @@ export const NamespaceList: React.FC<NamespaceListProps> = ({
             </button>
           </div>
           <div className="namespace-list-content">
-        {namespaces.length === 0 ? (
+        {filteredNamespaces.length === 0 ? (
           <div className="empty-state">No namespaces</div>
         ) : (
-          // 허용된 네임스페이스만 필터링하고 알파벳 순으로 정렬
-          [...namespaces]
-            .filter(namespace => ALLOWED_NAMESPACES.has(namespace.name))
+          // 시스템 namespace 제외하고 알파벳 순으로 정렬
+          [...filteredNamespaces]
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((namespace) => {
               const isVisible = visibleNamespaces.has(namespace.name)

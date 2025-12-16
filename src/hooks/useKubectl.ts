@@ -35,6 +35,12 @@ export function useKubectl() {
   }, [])
 
   const fetchPods = useCallback(async (context: string, namespace: string): Promise<Pod[]> => {
+    // namespace 검증
+    if (!namespace || namespace.trim() === '') {
+      console.warn('[useKubectl] Empty namespace provided, returning empty array')
+      return []
+    }
+    
     setLoading(true)
     setError(null)
     try {

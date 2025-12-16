@@ -1,4 +1,24 @@
-import type { KubernetesContext, Namespace, Pod, ContainerPort } from '@/types'
+import type { KubernetesContext, Namespace, Pod, ContainerPort, Deployment, Service } from '@/types'
+
+// 제외할 namespace 목록 (시스템 + 사용자 지정)
+const EXCLUDED_NAMESPACES = [
+  // 시스템 namespace
+  'kube-system',
+  'kube-public',
+  'kube-node-lease',
+  // 사용자 지정 제외 namespace
+  'default',
+  'argocd',
+  'azp',
+  'calico-system',
+  'gateway',
+  'migx',
+  'projectcontour',
+  'submarine',
+  'submarine-acct',
+  'test-ui',
+  'tigera-operator',
+]
 
 export async function getContexts(): Promise<KubernetesContext[]> {
   // electronAPI가 로드될 때까지 대기 (최대 5초)
@@ -83,7 +103,7 @@ export async function getNamespaces(context: string): Promise<Namespace[]> {
     try {
       const result = await window.electronAPI.getK8sNamespaces(context)
       if (result.success) {
-        return result.namespaces
+        return result.namespaces.filter(ns => !EXCLUDED_NAMESPACES.includes(ns.name)) // 제외할 namespace 필터링
       } else {
         throw new Error(result.error || '네임스페이스 조회 실패')
       }
@@ -112,7 +132,7 @@ export async function getNamespaces(context: string): Promise<Namespace[]> {
       age: calculateAge(item.metadata?.creationTimestamp),
     }))
 
-    return namespaces.filter(ns => ns.name.length > 0)
+    return namespaces.filter(ns => ns.name.length > 0 && !EXCLUDED_NAMESPACES.includes(ns.name)) // 제외할 namespace 필터링
   } catch (error) {
     throw new Error('네임스페이스 데이터 파싱 실패')
   }
@@ -123,16 +143,36 @@ export async function getPods(context: string, namespace: string): Promise<Pod[]
     throw new Error('Electron API가 사용할 수 없습니다')
   }
 
+  // namespace 검증 (빈 문자열이나 공백만 있는 경우도 체크)
+  if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
+    console.warn('[kubectl] Invalid namespace provided:', namespace)
+    return [] // 빈 배열 반환하여 에러 대신 처리
+  }
+
   // Kubernetes Client를 사용하여 Pod 조회
   if (window.electronAPI.getK8sPods) {
     try {
-      const result = await window.electronAPI.getK8sPods(context, namespace)
+      const result = await window.electronAPI.getK8sPods(context, namespace.trim())
       if (result.success) {
         return result.pods
       } else {
         throw new Error(result.error || 'Pod 조회 실패')
       }
     } catch (error: any) {
+      // 실제 에러 로깅
+      console.error('[kubectl] getPods Kubernetes Client error:', {
+        namespace,
+        context,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorStatus: error.statusCode
+      })
+      
+      // namespace 관련 에러인 경우 빈 배열 반환
+      if (error.message && error.message.includes('namespace was null or undefined')) {
+        console.warn('[kubectl] Namespace validation failed, returning empty array:', namespace)
+        return []
+      }
       console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
       // Fallback to kubectl command
     }
@@ -248,5 +288,152 @@ function extractDeploymentName(podItem: any): string {
   } catch (error) {
     // 에러 발생 시 Pod 이름 반환
     return podItem.metadata?.name || ''
+  }
+}
+
+export async function getDeployments(context: string): Promise<Deployment[]> {
+  if (!window.electronAPI) {
+    throw new Error('Electron API가 사용할 수 없습니다')
+  }
+
+  // Kubernetes Client를 사용하여 Deployment 조회
+  if (window.electronAPI.getK8sDeployments) {
+    try {
+      const result = await window.electronAPI.getK8sDeployments(context)
+      if (result.success) {
+        return result.deployments
+      } else {
+        throw new Error(result.error || 'Deployment 조회 실패')
+      }
+    } catch (error: any) {
+      console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
+      // Fallback to kubectl command
+    }
+  }
+
+  // Fallback: kubectl 명령어 사용
+  const result = await window.electronAPI.execKubectl([
+    '--context', context,
+    'get', 'deployments',
+    '--all-namespaces',
+    '-o', 'json'
+  ])
+
+  if (!result.success || !result.output) {
+    throw new Error(result.error || 'Deployment 조회 실패')
+  }
+
+  try {
+    const data = JSON.parse(result.output)
+    const deployments: Deployment[] = []
+
+    for (const item of data.items || []) {
+      const name = item.metadata?.name || ''
+      const namespace = item.metadata?.namespace || ''
+      
+      if (!name || !namespace) continue
+      
+      // 제외할 namespace 제외
+      if (EXCLUDED_NAMESPACES.includes(namespace)) continue
+      
+      deployments.push({ name, namespace })
+    }
+
+    return deployments
+  } catch (error) {
+    throw new Error('Deployment 데이터 파싱 실패')
+  }
+}
+
+export async function getServices(context: string, namespace: string): Promise<Service[]> {
+  if (!window.electronAPI) {
+    throw new Error('Electron API가 사용할 수 없습니다')
+  }
+
+  // 제외할 namespace 제외
+  if (EXCLUDED_NAMESPACES.includes(namespace)) {
+    return []
+  }
+
+  // Kubernetes Client를 사용하여 Service 조회
+  if (window.electronAPI.getK8sServices) {
+    try {
+      const result = await window.electronAPI.getK8sServices(context, namespace.trim())
+      if (result.success) {
+        return result.services
+      } else {
+        throw new Error(result.error || 'Service 조회 실패')
+      }
+    } catch (error: any) {
+      // 실제 에러 로깅
+      console.error('[kubectl] getServices Kubernetes Client error:', {
+        namespace,
+        context,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorStatus: error.statusCode
+      })
+      
+      console.warn('[kubectl] Failed to use Kubernetes Client, falling back to kubectl command:', error)
+      // Fallback to kubectl command
+    }
+  }
+
+  // Fallback: kubectl 명령어 사용
+  const result = await window.electronAPI.execKubectl([
+    '--context', context,
+    'get', 'services',
+    '-n', namespace,
+    '-o', 'json'
+  ])
+
+  if (!result.success || !result.output) {
+    throw new Error(result.error || 'Service 조회 실패')
+  }
+
+  try {
+    const data = JSON.parse(result.output)
+    const services: Service[] = []
+
+    for (const item of data.items || []) {
+      const name = item.metadata?.name || ''
+      if (!name) continue
+
+      // ClusterIP 타입만 필터링
+      const serviceType = item.spec?.type || ''
+      if (serviceType !== 'ClusterIP') continue
+
+      const clusterIP = item.spec?.clusterIP || ''
+      // clusterIP가 None인 경우 (Headless Service) 제외
+      if (clusterIP === 'None') continue
+
+      // 포트 정보 추출
+      const ports = []
+      const servicePorts = item.spec?.ports || []
+      for (const port of servicePorts) {
+        ports.push({
+          name: port.name || undefined,
+          port: port.port,
+          targetPort: port.targetPort || port.port,
+          protocol: port.protocol || 'TCP',
+        })
+      }
+
+      // Selector 추출
+      const selector = item.spec?.selector || {}
+
+      services.push({
+        name,
+        namespace,
+        type: serviceType,
+        clusterIP,
+        ports,
+        selector: Object.keys(selector).length > 0 ? selector : undefined,
+      })
+    }
+
+    return services
+  } catch (error) {
+    throw new Error('Service 데이터 파싱 실패')
   }
 }

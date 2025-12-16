@@ -11,6 +11,7 @@ interface ActivePortForwardsProps {
   podsByNamespace: Map<string, Pod[]>
   activeContext?: string | null
   activeLocalPorts?: Set<number>
+  selectedPods?: Set<string>
   onPortForwardChange?: (
     podName: string,
     remotePort: number,
@@ -32,6 +33,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
   podsByNamespace,
   activeContext,
   activeLocalPorts,
+  selectedPods,
   onPortForwardChange,
   onContextChange,
   onItemClick,
@@ -39,7 +41,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
 }) => {
   const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null)
   const [copiedDomainId, setCopiedDomainId] = React.useState<string | null>(null)
-  // 모든 활성 포트포워딩 정보 수집
+  // 선택한 Pod의 활성 포트포워딩 정보 수집
   const activePortForwards = React.useMemo<ActivePortForwardItem[]>(() => {
     const items: ActivePortForwardItem[] = []
 
@@ -54,6 +56,11 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
 
         // 모든 Pod 순회
         for (const [podName, podPortMap] of namespaceMap.entries()) {
+          // 선택한 Pod만 표시 (selectedPods가 없으면 모든 Pod 표시)
+          if (selectedPods && selectedPods.size > 0 && !selectedPods.has(podName)) {
+            continue
+          }
+          
           // 모든 포트포워딩 순회
           for (const [remotePort, config] of podPortMap.entries()) {
             if (config.active) {
@@ -73,7 +80,7 @@ export const ActivePortForwards: React.FC<ActivePortForwardsProps> = ({
     }
 
     return items.sort((a, b) => a.localPort - b.localPort)
-  }, [portForwards, podsByNamespace])
+  }, [portForwards, podsByNamespace, selectedPods])
 
   if (activePortForwards.length === 0) {
     return (

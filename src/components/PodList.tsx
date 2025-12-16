@@ -1,108 +1,233 @@
-import React from 'react'
-import type { Pod, PortForwardConfig } from '@/types'
-import { PortForwardingRow } from './PortForwardingRow'
+import React, { useMemo } from 'react'
+import type { Pod, PortForwardConfig, Service } from '@/types'
 import './PodList.css'
 
 interface PodListProps {
   pods: Pod[]
   portForwards: Map<string, Map<number, PortForwardConfig>>
   activeContext?: string | null
+  services?: Service[]
+  selectedPods: Set<string>
+  expandedDeployments: Set<string>
   onPortForwardChange: (
     podName: string,
     remotePort: number,
     localPort: number,
     enabled: boolean
   ) => void
+  onPodSelect: (podName: string, selected: boolean) => void
+  onDeploymentToggle: (deployment: string) => void
+}
+
+// HTTP 프로토콜 판단 헬퍼 함수
+const isHttpPort = (servicePort: { name?: string }, podPort: { name?: string; containerPort: number }): boolean => {
+  // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
+  if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
+    return true
+  }
+  // Pod 포트 이름에 "http"가 포함되어 있는지 확인
+  if (podPort.name && podPort.name.toLowerCase().includes('http')) {
+    return true
+  }
+  return false
 }
 
 export const PodList: React.FC<PodListProps> = ({
   pods,
   portForwards,
-  activeContext,
+  services = [],
+  selectedPods,
+  expandedDeployments,
   onPortForwardChange,
+  onPodSelect,
+  onDeploymentToggle,
 }) => {
-  if (pods.length === 0) {
+  // Pod와 Service 매칭을 위한 맵 생성
+  const podServiceMap = useMemo(() => {
+    const map = new Map<string, Service>()
+    for (const service of services) {
+      if (service.selector) {
+        for (const pod of pods) {
+          if (!pod.labels) continue
+          let matches = true
+          for (const [key, value] of Object.entries(service.selector)) {
+            if (pod.labels[key] !== value) {
+              matches = false
+              break
+            }
+          }
+          if (matches && !map.has(pod.name)) {
+            map.set(pod.name, service)
+          }
+        }
+      }
+    }
+    return map
+  }, [pods, services])
+
+  // HTTP 포트만 필터링된 Pod 목록
+  const httpPods = useMemo(() => {
+    return pods.filter(pod => {
+      // FAILED 상태는 제외
+      if (pod.status.toLowerCase() === 'failed') {
+        return false
+      }
+      
+      // HTTP 포트가 있는지 확인
+      const service = podServiceMap.get(pod.name)
+      for (const podPort of pod.ports) {
+        let isHttp = false
+        
+        if (service) {
+          // Service의 포트 중 Pod 포트와 매칭되는 것 찾기
+          for (const servicePort of service.ports) {
+            const targetPort = servicePort.targetPort
+            let matches = false
+            
+            if (typeof targetPort === 'number') {
+              matches = targetPort === podPort.containerPort
+            } else {
+              matches = targetPort === podPort.name
+            }
+            
+            if (matches) {
+              isHttp = isHttpPort(servicePort, podPort)
+              break
+            }
+          }
+        } else {
+          // Service가 없으면 Pod 포트 이름만 확인
+          isHttp = podPort.name ? podPort.name.toLowerCase().includes('http') : false
+        }
+        
+        if (isHttp) {
+          return true
+        }
+      }
+      
+      return false
+    })
+  }, [pods, podServiceMap])
+
+  // Deployment 단위로 그룹화
+  const deploymentsMap = useMemo(() => {
+    const map = new Map<string, Pod[]>()
+    for (const pod of httpPods) {
+      const deployment = pod.deployment || pod.name
+      if (!map.has(deployment)) {
+        map.set(deployment, [])
+      }
+      map.get(deployment)!.push(pod)
+    }
+    return map
+  }, [httpPods])
+
+  if (httpPods.length === 0) {
     return (
       <div className="pod-list-empty">
-        <p>No pods</p>
+        <p>No HTTP pods</p>
       </div>
     )
   }
 
-  // FAILED 상태이거나 포트가 없는 Pod는 필터링
-  const validPods = pods.filter(pod => {
-    // FAILED 상태는 제외
-    if (pod.status.toLowerCase() === 'failed') {
-      return false
-    }
-    // 포트 정보가 없으면 제외
-    if (pod.ports.length === 0) {
-      return false
-    }
-    return true
+  // Deployment 목록을 정렬
+  const sortedDeployments = Array.from(deploymentsMap.entries()).sort((a, b) => {
+    return a[0].localeCompare(b[0])
   })
-  
-  // 모든 Pod를 표시 (선택한 모든 네임스페이스의 Pod)
-  // Pod를 네임스페이스별, 이름별로 정렬
-  const sortedPods = [...validPods].sort((a, b) => {
-    // 먼저 네임스페이스로 정렬
-    const nsCompare = a.namespace.localeCompare(b.namespace)
-    if (nsCompare !== 0) return nsCompare
-    // 같은 네임스페이스 내에서는 이름으로 정렬
-    return a.name.localeCompare(b.name)
-  })
-  
-  if (sortedPods.length === 0) {
-    return (
-      <div className="pod-list-empty">
-        <p>No pods</p>
-      </div>
-    )
-  }
-  
-  // 모든 Pod의 모든 포트를 표시
+
   return (
     <div className="pod-list">
-      {sortedPods.map((pod) => {
-        const podPortForwards = portForwards.get(pod.name) || new Map()
+      {sortedDeployments.map(([deployment, deploymentPods]) => {
+        const isExpanded = expandedDeployments.has(deployment)
+        const sortedPods = [...deploymentPods].sort((a, b) => a.name.localeCompare(b.name))
         
-        // 포트가 없으면 Pod 이름만 표시
-        if (pod.ports.length === 0) {
-          return (
-            <div key={pod.name} className="pod-row-single">
-              <div className="pod-row-content">
-                <span className="pod-name-inline">{pod.name}</span>
-                <span className="pod-namespace-inline">{pod.namespace}</span>
-                <span className={`pod-status-inline pod-status-${pod.status.toLowerCase()}`}>
-                  {pod.status}
-                </span>
-                <span className="pod-age-inline">{pod.age}</span>
-                <div className="pod-row-empty">No port info</div>
-              </div>
+        return (
+          <div key={deployment} className="deployment-group">
+            <div 
+              className="deployment-header"
+              onClick={() => onDeploymentToggle(deployment)}
+            >
+              <span className="deployment-expand-icon">
+                {isExpanded ? '▼' : '▶'}
+              </span>
+              <span className="deployment-name">{deployment}</span>
+              <span className="deployment-pod-count">({sortedPods.length})</span>
             </div>
-          )
-        }
-        
-        // 각 포트별로 한 줄씩 표시
-        return pod.ports.map((port) => {
-          const portForward = podPortForwards.get(port.containerPort) || null
-          return (
-            <PortForwardingRow
-              key={`${pod.name}-${port.containerPort}-${port.protocol}`}
-              podName={pod.name}
-              podNamespace={pod.namespace}
-              podStatus={pod.status}
-              podAge={pod.age}
-              podDeployment={pod.deployment}
-              podContext={activeContext || undefined}
-              port={port}
-              portForward={portForward}
-              onPortForwardChange={onPortForwardChange}
-            />
-          )
-        })
+            
+            {isExpanded && (
+              <div className="deployment-pods">
+                {sortedPods.map((pod) => {
+                  const isSelected = selectedPods.has(pod.name)
+                  const podPortForwards = portForwards.get(pod.name) || new Map()
+                  
+                  // HTTP 포트만 필터링
+                  const httpPorts = pod.ports.filter(podPort => {
+                    const service = podServiceMap.get(pod.name)
+                    if (service) {
+                      for (const servicePort of service.ports) {
+                        const targetPort = servicePort.targetPort
+                        let matches = false
+                        
+                        if (typeof targetPort === 'number') {
+                          matches = targetPort === podPort.containerPort
+                        } else {
+                          matches = targetPort === podPort.name
+                        }
+                        
+                        if (matches) {
+                          return isHttpPort(servicePort, podPort)
+                        }
+                      }
+                    } else {
+                      return podPort.name ? podPort.name.toLowerCase().includes('http') : false
+                    }
+                    return false
+                  })
+                  
+                  return (
+                    <div key={pod.name} className="pod-item">
+                      <div className="pod-item-header">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => onPodSelect(pod.name, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="pod-name">{pod.name}</span>
+                        <span className={`pod-status pod-status-${pod.status.toLowerCase()}`}>
+                          {pod.status}
+                        </span>
+                      </div>
+                      {httpPorts.map((port) => {
+                        const portForward = podPortForwards.get(port.containerPort) || null
+                        return (
+                          <div 
+                            key={`${pod.name}-${port.containerPort}`}
+                            className={`port-item ${portForward?.active ? 'port-active' : ''}`}
+                            onClick={() => {
+                              if (portForward?.active) {
+                                onPortForwardChange(pod.name, port.containerPort, portForward.localPort, false)
+                              } else {
+                                onPortForwardChange(pod.name, port.containerPort, port.containerPort, true)
+                              }
+                            }}
+                          >
+                            <span className="port-name">{port.name || 'http'}</span>
+                            <span className="port-number">{port.containerPort}</span>
+                            {portForward?.domain && (
+                              <span className="port-domain">🌐 {portForward.domain}</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
       })}
     </div>
   )
 }
-

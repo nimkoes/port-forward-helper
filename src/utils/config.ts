@@ -52,43 +52,12 @@ export function getNamespaceDefaultPorts(): Map<string, number> {
 
 /**
  * 허용된 네임스페이스 목록을 반환합니다.
- * 환경 변수 VITE_ALLOWED_NAMESPACES에서 읽어오며, 쉼표로 구분된 문자열입니다.
- * namespace:port 형식도 지원하며, 이 경우 네임스페이스만 추출합니다.
- * 환경 변수가 설정되지 않은 경우 빈 Set을 반환합니다.
+ * VITE_ALLOWED_NAMESPACES는 더 이상 사용하지 않으며, 모든 namespace를 처리합니다.
+ * 시스템 namespace (kube-system, kube-public, kube-node-lease)는 자동으로 제외됩니다.
+ * @deprecated 이 함수는 하위 호환성을 위해 유지되지만 항상 빈 Set을 반환합니다.
  */
 export function getAllowedNamespaces(): Set<string> {
-  const envValue = import.meta.env.VITE_ALLOWED_NAMESPACES
-  
-  if (!envValue || typeof envValue !== 'string') {
-    console.warn('VITE_ALLOWED_NAMESPACES가 설정되지 않았습니다. .env 파일을 확인하세요.')
-    return new Set<string>()
-  }
-
-  const namespaces = new Set<string>()
-  
-  // 쉼표로 구분된 문자열을 배열로 변환하고, 공백 제거
-  const items = envValue
-    .split(',')
-    .map(item => item.trim())
-    .filter(item => item.length > 0)
-
-  // 각 항목에서 네임스페이스 추출 (namespace:port 형식에서도 네임스페이스만 추출)
-  for (const item of items) {
-    const colonIndex = item.indexOf(':')
-    if (colonIndex > 0) {
-      // namespace:port 형식 - 네임스페이스만 추출
-      const namespace = item.substring(0, colonIndex).trim()
-      if (namespace.length > 0) {
-        namespaces.add(namespace)
-      }
-    } else {
-      // namespace만 있는 형식
-      if (item.length > 0) {
-        namespaces.add(item)
-      }
-    }
-  }
-
-  return namespaces
+  // 모든 namespace를 처리하므로 빈 Set 반환 (필터링 없음)
+  return new Set<string>()
 }
 

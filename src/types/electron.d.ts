@@ -13,6 +13,7 @@ export interface ElectronAPI {
   ) => Promise<{
     success: boolean
     pid: number | null
+    localPort: number | null
     error: string | null
   }>
   stopPortForward: (pid: number) => Promise<{
@@ -86,7 +87,57 @@ export interface ElectronAPI {
         protocol: string
       }>
       deployment?: string
+      creationTimestamp?: string
+      labels?: Record<string, string>
+      spec?: {
+        containers?: Array<{
+          ports?: Array<{
+            name?: string
+            containerPort: number
+            protocol?: string
+          }>
+        }>
+      }
     }>
+    error: string | null
+  }>
+  getK8sDeployments: (context: string) => Promise<{
+    success: boolean
+    deployments: Array<{
+      name: string
+      namespace: string
+    }>
+    error: string | null
+  }>
+  getK8sServices: (context: string, namespace: string) => Promise<{
+    success: boolean
+    services: Array<{
+      name: string
+      namespace: string
+      type: string
+      clusterIP?: string
+      ports: Array<{
+        name?: string
+        port: number
+        targetPort: number | string
+        protocol: string
+      }>
+      selector?: Record<string, string>
+    }>
+    error: string | null
+  }>
+  startServicePortForward: (config: {
+    context: string
+    namespace: string
+    serviceName: string
+    servicePort: number
+    targetPort: number | string
+    podName: string
+    podPort: number
+  }) => Promise<{
+    success: boolean
+    pid: number | null
+    localPort: number | null
     error: string | null
   }>
 }

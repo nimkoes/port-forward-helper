@@ -11,7 +11,7 @@ export function usePortForward() {
     pod: string,
     localPort: number,
     remotePort: number
-  ): Promise<number> => {
+  ): Promise<{ pid: number; localPort: number }> => {
     if (!window.electronAPI) {
       throw new Error('Electron API가 사용할 수 없습니다')
     }
@@ -28,11 +28,11 @@ export function usePortForward() {
         remotePort
       )
 
-      if (!result.success || !result.pid) {
+      if (!result.success || !result.pid || !result.localPort) {
         throw new Error(result.error || '포트포워딩 시작 실패')
       }
 
-      return result.pid
+      return { pid: result.pid, localPort: result.localPort }
     } catch (err: any) {
       setError(err.message || '포트포워딩 시작 실패')
       throw err

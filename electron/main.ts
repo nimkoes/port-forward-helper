@@ -5,7 +5,7 @@ import { exec, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
 import { config } from 'dotenv'
-import { KubeConfig, CoreV1Api, PortForward } from '@kubernetes/client-node'
+import { KubeConfig, CoreV1Api, AppsV1Api, PortForward } from '@kubernetes/client-node'
 import net from 'net'
 import portfinder from 'portfinder'
 import * as proxyServer from './proxy-server'
@@ -30,7 +30,7 @@ const portForwardProcesses = new Map<number, ChildProcess>()
 const hostsManager = new HostsManager()
 
 // Kubernetes Client 인스턴스 (컨텍스트별로 관리)
-const kubeConfigs = new Map<string, { kc: KubeConfig; k8sApi: CoreV1Api; forwarder: PortForward }>()
+const kubeConfigs = new Map<string, { kc: KubeConfig; k8sApi: CoreV1Api; appsApi: AppsV1Api; forwarder: PortForward }>()
 
 // 포트포워딩 서버 추적 (Kubernetes Client 사용)
 const portForwardServers = new Map<number, net.Server>()
@@ -42,8 +42,9 @@ function getKubeClient(context: string) {
     kc.loadFromDefault()
     kc.setCurrentContext(context)
     const k8sApi = kc.makeApiClient(CoreV1Api)
+    const appsApi = kc.makeApiClient(AppsV1Api)
     const forwarder = new PortForward(kc)
-    kubeConfigs.set(context, { kc, k8sApi, forwarder })
+    kubeConfigs.set(context, { kc, k8sApi, appsApi, forwarder })
   }
   return kubeConfigs.get(context)!
 }
@@ -175,7 +176,8 @@ ipcMain.handle('get-k8s-namespaces', async (_, context: string) => {
     const { k8sApi } = getKubeClient(context)
     const res = await k8sApi.listNamespace()
     
-    const namespaces = (res.body.items || []).map((item: any) => {
+    const items = (res as any).body?.items || (res as any).items || []
+    const namespaces = items.map((item: any) => {
       const creationTimestamp = item.metadata?.creationTimestamp
       const age = creationTimestamp
         ? calculateAge(creationTimestamp)
@@ -204,12 +206,55 @@ ipcMain.handle('get-k8s-namespaces', async (_, context: string) => {
 
 // Kubernetes Client로 Pod 목록 조회
 ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => {
+  console.log(`[Main] get-k8s-pods handler called with context: "${context}", namespace: "${namespace}"`)
   try {
-    const { k8sApi } = getKubeClient(context)
-    const res = await k8sApi.listNamespacedPod(namespace)
+    // namespace 검증
+    if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
+      console.warn('[Main] Invalid namespace provided to get-k8s-pods:', namespace)
+      return {
+        success: false,
+        pods: [],
+        error: `Invalid namespace: ${namespace}`,
+      }
+    }
+
+    const trimmedNamespace = namespace.trim()
     
+    // 제외할 namespace 제외
+    if (EXCLUDED_NAMESPACES.includes(trimmedNamespace)) {
+      console.log(`[Main] Namespace "${trimmedNamespace}" is excluded, returning empty array`)
+      return {
+        success: true,
+        pods: [],
+        error: null,
+      }
+    }
+
+    const { k8sApi } = getKubeClient(context)
+    
+    console.log(`[Main] Calling listNamespacedPod with namespace: "${trimmedNamespace}"`)
+    console.log(`[Main] trimmedNamespace type: ${typeof trimmedNamespace}, value: "${trimmedNamespace}"`)
+    let res: any
+    try {
+      // Kubernetes client-node의 최신 버전에서는 옵션 객체를 받습니다
+      if (typeof trimmedNamespace !== 'string' || trimmedNamespace.length === 0) {
+        throw new Error(`Invalid namespace: ${trimmedNamespace}`)
+      }
+      res = await k8sApi.listNamespacedPod({ namespace: trimmedNamespace } as any)
+    } catch (apiError: any) {
+      console.error(`[Main] listNamespacedPod API call failed:`, apiError)
+      console.error(`[Main] Error details:`, {
+        message: apiError.message,
+        code: apiError.code,
+        statusCode: apiError.statusCode,
+        body: apiError.body
+      })
+      throw apiError
+    }
+    
+    const items = (res as any).body?.items || (res as any).items || []
     const pods = []
-    for (const item of res.body.items || []) {
+    for (const item of items) {
       const podName = item.metadata?.name || ''
       if (!podName) continue
 
@@ -236,6 +281,20 @@ ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => 
       // Deployment 이름 추출
       const deployment = extractDeploymentName(item)
 
+      // Labels 추출
+      const labels = item.metadata?.labels || {}
+
+      // Spec 정보 추출 (포트 매칭을 위해 필요)
+      const spec = {
+        containers: (item.spec?.containers || []).map((container: any) => ({
+          ports: (container.ports || []).map((port: any) => ({
+            name: port.name || undefined,
+            containerPort: port.containerPort,
+            protocol: port.protocol || 'TCP',
+          })),
+        })),
+      }
+
       pods.push({
         name: podName,
         namespace,
@@ -243,6 +302,9 @@ ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => 
         age,
         ports,
         deployment,
+        creationTimestamp: creationTimestamp || undefined,
+        labels,
+        spec,
       })
     }
 
@@ -256,6 +318,214 @@ ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => 
       success: false,
       pods: [],
       error: error.message || String(error),
+    }
+  }
+})
+
+// 제외할 namespace 목록 (시스템 + 사용자 지정)
+const EXCLUDED_NAMESPACES = [
+  // 시스템 namespace
+  'kube-system',
+  'kube-public',
+  'kube-node-lease',
+  // 사용자 지정 제외 namespace
+  'default',
+  'argocd',
+  'azp',
+  'calico-system',
+  'gateway',
+  'migx',
+  'projectcontour',
+  'submarine',
+  'submarine-acct',
+  'test-ui',
+  'tigera-operator',
+]
+
+// Kubernetes Client로 Deployment 목록 조회
+ipcMain.handle('get-k8s-deployments', async (_, context: string) => {
+  try {
+    const { appsApi } = getKubeClient(context)
+    const res = await appsApi.listDeploymentForAllNamespaces()
+    
+    const items = (res as any).body?.items || (res as any).items || []
+    const deployments = []
+    for (const item of items) {
+      const name = item.metadata?.name || ''
+      const namespace = item.metadata?.namespace || ''
+      
+      if (!name || !namespace) continue
+      
+      // 제외할 namespace 제외
+      if (EXCLUDED_NAMESPACES.includes(namespace)) continue
+      
+      deployments.push({
+        name,
+        namespace,
+      })
+    }
+
+    return {
+      success: true,
+      deployments,
+      error: null,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      deployments: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// Kubernetes Client로 Service 목록 조회
+ipcMain.handle('get-k8s-services', async (_, context: string, namespace: string) => {
+  console.log(`[Main] get-k8s-services handler called with context: "${context}", namespace: "${namespace}"`)
+  try {
+    // namespace 검증
+    if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
+      console.warn('[Main] Invalid namespace provided to get-k8s-services:', namespace)
+      return {
+        success: false,
+        services: [],
+        error: `Invalid namespace: ${namespace}`,
+      }
+    }
+
+    const trimmedNamespace = namespace.trim()
+    
+    // 제외할 namespace 제외
+    if (EXCLUDED_NAMESPACES.includes(trimmedNamespace)) {
+      console.log(`[Main] Namespace "${trimmedNamespace}" is excluded, returning empty array`)
+      return {
+        success: true,
+        services: [],
+        error: null,
+      }
+    }
+
+    const { k8sApi } = getKubeClient(context)
+    
+    console.log(`[Main] Calling listNamespacedService with namespace: "${trimmedNamespace}"`)
+    console.log(`[Main] trimmedNamespace type: ${typeof trimmedNamespace}, value: "${trimmedNamespace}"`)
+    let res: any
+    try {
+      // Kubernetes client-node의 최신 버전에서는 옵션 객체를 받습니다
+      if (typeof trimmedNamespace !== 'string' || trimmedNamespace.length === 0) {
+        throw new Error(`Invalid namespace: ${trimmedNamespace}`)
+      }
+      res = await k8sApi.listNamespacedService({ namespace: trimmedNamespace } as any)
+    } catch (apiError: any) {
+      console.error(`[Main] listNamespacedService API call failed:`, apiError)
+      console.error(`[Main] Error details:`, {
+        message: apiError.message,
+        code: apiError.code,
+        statusCode: apiError.statusCode,
+        body: apiError.body
+      })
+      throw apiError
+    }
+    
+    const items = (res as any).body?.items || (res as any).items || []
+    const services = []
+    for (const item of items) {
+      const name = item.metadata?.name || ''
+      if (!name) continue
+
+      // ClusterIP 타입만 필터링
+      const serviceType = item.spec?.type || ''
+      if (serviceType !== 'ClusterIP') continue
+
+      const clusterIP = item.spec?.clusterIP || ''
+      // clusterIP가 None인 경우 (Headless Service) 제외
+      if (clusterIP === 'None') continue
+
+      // 포트 정보 추출
+      const ports = []
+      const servicePorts = item.spec?.ports || []
+      for (const port of servicePorts) {
+        ports.push({
+          name: port.name || undefined,
+          port: port.port,
+          targetPort: port.targetPort || port.port, // targetPort가 없으면 port 사용
+          protocol: port.protocol || 'TCP',
+        })
+      }
+
+      // Selector 추출
+      const selector = item.spec?.selector || {}
+
+      services.push({
+        name,
+        namespace,
+        type: serviceType,
+        clusterIP,
+        ports,
+        selector: Object.keys(selector).length > 0 ? selector : undefined,
+      })
+    }
+
+    return {
+      success: true,
+      services,
+      error: null,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      services: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// Service 포트포워딩 시작
+ipcMain.handle('start-service-port-forward', async (_, config: {
+  context: string
+  namespace: string
+  serviceName: string
+  servicePort: number
+  targetPort: number | string
+  podName: string
+  podPort: number
+}) => {
+  try {
+    const { forwarder } = getKubeClient(config.context)
+    
+    // portfinder로 사용 가능한 포트 찾기
+    const targetLocalPort = await portfinder.getPortPromise()
+
+    // net.Server를 생성하여 포트포워딩
+    const server = net.createServer((socket) => {
+      forwarder.portForward(config.namespace, config.podName, [config.podPort], socket, null, socket)
+    })
+
+    return new Promise((resolve, reject) => {
+      server.listen(targetLocalPort, () => {
+        console.log(`[Main] Forwarding Service ${config.serviceName}.${config.namespace}:${config.servicePort} -> ${config.context}/${config.namespace}/${config.podName}:${config.podPort} (local: ${targetLocalPort})`)
+        // 서버를 추적하기 위해 포트를 키로 사용
+        portForwardServers.set(targetLocalPort, server)
+        
+        resolve({ 
+          success: true, 
+          pid: targetLocalPort, 
+          localPort: targetLocalPort,
+          error: null 
+        })
+      })
+
+      server.on('error', (err) => {
+        console.error('[Main] Service port forward server error:', err)
+        reject(err)
+      })
+    })
+  } catch (error: any) {
+    return { 
+      success: false, 
+      pid: null,
+      localPort: null,
+      error: error.message || String(error) 
     }
   }
 })
@@ -316,12 +586,34 @@ ipcMain.handle('start-port-forward', async (_, config: {
     
     // portfinder로 사용 가능한 포트 찾기 (지정된 포트가 사용 중일 수 있음)
     let targetLocalPort = config.localPort
-    try {
-      // 지정된 포트가 사용 가능한지 확인
-      await portfinder.getPortPromise({ port: config.localPort })
-    } catch {
-      // 사용 불가능하면 자동으로 사용 가능한 포트 찾기
-      targetLocalPort = await portfinder.getPortPromise()
+    
+    // 포트가 이미 사용 중인지 확인
+    if (portForwardServers.has(config.localPort)) {
+      // 이미 추적 중인 서버가 있으면 다른 포트 사용
+      console.log(`[Main] Port ${config.localPort} is already tracked, finding available port...`)
+      targetLocalPort = await portfinder.getPortPromise({ port: config.localPort })
+      console.log(`[Main] Using alternative port: ${targetLocalPort}`)
+    } else {
+      // 포트가 실제로 사용 가능한지 확인
+      const isPortInUse = await new Promise<boolean>((resolve) => {
+        const testServer = net.createServer()
+        testServer.once('error', (err: any) => {
+          // EADDRINUSE 에러면 포트가 사용 중
+          resolve(err.code === 'EADDRINUSE')
+        })
+        testServer.once('listening', () => {
+          // 포트가 사용 가능하면 즉시 닫기
+          testServer.close(() => resolve(false))
+        })
+        testServer.listen(config.localPort)
+      })
+      
+      if (isPortInUse) {
+        // 사용 중이면 자동으로 사용 가능한 포트 찾기
+        console.log(`[Main] Port ${config.localPort} is already in use, finding available port...`)
+        targetLocalPort = await portfinder.getPortPromise({ port: config.localPort })
+        console.log(`[Main] Using alternative port: ${targetLocalPort}`)
+      }
     }
 
     // net.Server를 생성하여 포트포워딩
@@ -336,18 +628,34 @@ ipcMain.handle('start-port-forward', async (_, config: {
         portForwardServers.set(targetLocalPort, server)
         
         // 실제 PID는 없지만, 포트를 PID처럼 사용
-        resolve({ success: true, pid: targetLocalPort, error: null })
+        resolve({ success: true, pid: targetLocalPort, localPort: targetLocalPort, error: null })
       })
 
-      server.on('error', (err) => {
+      server.on('error', (err: any) => {
         console.error('[Main] Port forward server error:', err)
-        reject(err)
+        // EADDRINUSE 에러인 경우 다른 포트 시도
+        if (err.code === 'EADDRINUSE') {
+          portfinder.getPortPromise({ port: targetLocalPort })
+            .then((newPort) => {
+              server.listen(newPort, () => {
+                console.log(`[Main] Forwarding 127.0.0.1:${newPort} -> ${config.context}/${config.namespace}/${config.pod}:${config.remotePort} (retry)`)
+                portForwardServers.set(newPort, server)
+                resolve({ success: true, pid: newPort, localPort: newPort, error: null })
+              })
+            })
+            .catch((retryError) => {
+              reject(retryError)
+            })
+        } else {
+          reject(err)
+        }
       })
     })
   } catch (error: any) {
     return { 
       success: false, 
-      pid: null, 
+      pid: null,
+      localPort: null,
       error: error.message || String(error) 
     }
   }
@@ -528,14 +836,14 @@ const cleanup = async () => {
   
   try {
     // 모든 포트포워딩 프로세스 종료 (kubectl 방식)
-    portForwardProcesses.forEach((process) => {
+  portForwardProcesses.forEach((process) => {
       try {
-        process.kill()
+    process.kill()
       } catch (error) {
         // 무시
       }
-    })
-    portForwardProcesses.clear()
+  })
+  portForwardProcesses.clear()
 
     // 모든 포트포워딩 서버 종료 (Kubernetes Client 방식)
     for (const [port, server] of portForwardServers.entries()) {

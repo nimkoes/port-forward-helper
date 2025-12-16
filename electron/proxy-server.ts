@@ -1,6 +1,7 @@
 import express from 'express'
 import { createProxyMiddleware } from 'http-proxy-middleware'
 import { Server } from 'http'
+import portfinder from 'portfinder'
 
 let app: express.Application | null = null
 let server: Server | null = null
@@ -21,9 +22,26 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
   
   // 동적 라우팅을 위한 미들웨어
   app.use((req, res, next) => {
-    const host = req.get('host')?.split(':')[0] || req.hostname
+    const hostHeader = req.get('host') || req.hostname
+    const [host, port] = hostHeader.split(':')
+    const requestPort = port ? parseInt(port, 10) : 80
     
-    if (host && routes.has(host)) {
+    // 라우팅 키 생성: host:port 형식 (포트가 80이면 host만 사용)
+    const routeKey = requestPort === 80 ? host : `${host}:${requestPort}`
+    
+    // 먼저 정확한 키로 찾기
+    if (routes.has(routeKey)) {
+      const targetPort = routes.get(routeKey)!
+      const proxy = createProxyMiddleware({
+        target: `http://localhost:${targetPort}`,
+        changeOrigin: true,
+        logLevel: 'silent',
+      })
+      return proxy(req, res, next)
+    }
+    
+    // 포트가 80이 아니고 정확한 키를 찾지 못한 경우, host만으로도 시도
+    if (requestPort !== 80 && routes.has(host)) {
       const targetPort = routes.get(host)!
       const proxy = createProxyMiddleware({
         target: `http://localhost:${targetPort}`,
@@ -34,10 +52,10 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
     }
     
     // 라우팅이 없으면 404
-    res.status(404).send('No route found for this domain')
+    res.status(404).send(`No route found for this domain: ${routeKey}`)
   })
 
-  // 포트 시도: preferredPort부터 시작
+  // 포트 시도: preferredPort부터 시작, 실패하면 portfinder로 사용 가능한 포트 찾기
   const portsToTry = [preferredPort, 8080]
   
   for (const port of portsToTry) {
@@ -58,11 +76,12 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
         })
       })
       
-      return currentPort
+      return currentPort!
     } catch (error: any) {
       console.warn(`[Proxy Server] Failed to start on port ${port}: ${error.message}`)
       if (server) {
-        server.close()
+        const serverToClose: Server = server
+        serverToClose.close()
         server = null
       }
       // 다음 포트 시도
@@ -70,7 +89,31 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
     }
   }
   
-  throw new Error('Failed to start proxy server on any port')
+  // 모든 포트가 실패하면 portfinder로 사용 가능한 포트 찾기
+  try {
+    console.log(`[Proxy Server] All preferred ports failed, finding available port...`)
+    const availablePort = await portfinder.getPortPromise({ port: 8080, stopPort: 9000 })
+    
+    await new Promise<void>((resolve, reject) => {
+      server = app!.listen(availablePort, () => {
+        currentPort = availablePort
+        console.log(`[Proxy Server] Started on available port ${availablePort}`)
+        resolve()
+      })
+      
+      server.on('error', (err: any) => {
+        reject(err)
+      })
+    })
+    
+    if (!currentPort) {
+      throw new Error('Failed to set currentPort after starting server')
+    }
+    return currentPort
+  } catch (error: any) {
+    console.error(`[Proxy Server] Failed to start on any available port: ${error.message}`)
+    throw new Error('Failed to start proxy server on any port')
+  }
 }
 
 /**

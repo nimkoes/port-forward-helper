@@ -47,6 +47,23 @@ try {
     
     // Kubernetes Client로 Pod 목록 조회
     getK8sPods: (context: string, namespace: string) => ipcRenderer.invoke('get-k8s-pods', context, namespace),
+    
+    // Kubernetes Client로 Deployment 목록 조회
+    getK8sDeployments: (context: string) => ipcRenderer.invoke('get-k8s-deployments', context),
+    
+    // Kubernetes Client로 Service 목록 조회
+    getK8sServices: (context: string, namespace: string) => ipcRenderer.invoke('get-k8s-services', context, namespace),
+    
+    // Service 포트포워딩 시작
+    startServicePortForward: (config: {
+      context: string
+      namespace: string
+      serviceName: string
+      servicePort: number
+      targetPort: number | string
+      podName: string
+      podPort: number
+    }) => ipcRenderer.invoke('start-service-port-forward', config),
   })
   console.log('[Preload] electronAPI exposed successfully')
 } catch (error) {
