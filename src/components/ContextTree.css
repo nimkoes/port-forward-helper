@@ -31,6 +31,33 @@
   padding: 6px;
 }
 
+.context-tree-top-section {
+  flex-shrink: 0;
+  padding: 6px;
+  overflow-y: auto;
+  max-height: 30vh;
+  border-bottom: 1px solid #333;
+  transition: all 0.3s ease-out;
+}
+
+.context-tree-scroll-section {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  min-height: 0;
+  overflow-x: hidden;
+  transition: all 0.3s ease-out;
+}
+
+.context-tree-bottom-section {
+  flex-shrink: 0;
+  padding: 6px;
+  overflow-y: auto;
+  max-height: 30vh;
+  border-top: 1px solid #333;
+  transition: all 0.3s ease-out;
+}
+
 .empty-state {
   padding: 16px;
   text-align: center;
@@ -40,6 +67,7 @@
 
 .context-tree-node {
   margin-bottom: 2px;
+  transition: transform 0.3s ease-out, opacity 0.3s ease-out;
 }
 
 .context-tree-node-header {
@@ -55,6 +83,16 @@
 
 .context-tree-node-header:hover {
   background: #2a2d2e;
+}
+
+.context-tree-node-header.expanded {
+  background: #1e3a3a;
+  border-left: 3px solid #4ec9b0;
+  padding-left: 3px;
+}
+
+.context-tree-node-header.expanded:hover {
+  background: #2a4a4a;
 }
 
 .tree-expand-icon {
@@ -88,14 +126,47 @@
   margin-right: 4px;
 }
 
-.current-badge {
-  font-size: 10px;
+.tree-all-forward-button {
+  background: transparent;
+  border: 1px solid #4ec9b0;
+  color: #4ec9b0;
+  cursor: pointer;
   padding: 2px 6px;
-  background: #007acc;
-  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 3px;
-  font-weight: 500;
+  font-size: 10px;
+  transition: all 0.15s;
   flex-shrink: 0;
+  font-weight: 500;
+  gap: 4px;
+}
+
+.tree-all-forward-button:hover:not(:disabled) {
+  background: #4ec9b0;
+  color: #1e1e1e;
+}
+
+.tree-all-forward-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  border-color: #666;
+  color: #888;
+}
+
+.all-forward-spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .context-tree-node-actions {
@@ -138,6 +209,16 @@
 .context-tree-node-children {
   padding-left: 16px;
   margin-top: 2px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+  opacity: 0;
+}
+
+.context-tree-node-children.expanded {
+  max-height: 2000px;
+  opacity: 1;
+  transition: max-height 0.3s ease-in, opacity 0.3s ease-in;
 }
 
 .empty-namespace-state {
@@ -181,6 +262,8 @@
   border-radius: 4px;
   transition: all 0.15s;
   border: 1px solid transparent;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .namespace-tree-item:hover {
@@ -206,6 +289,8 @@
   border: none;
   padding: 0;
   text-align: left;
+  width: 100%;
+  min-width: 0;
 }
 
 .namespace-tree-icon {

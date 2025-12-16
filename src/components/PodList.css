@@ -12,9 +12,14 @@
   padding: 10px 16px;
   border-bottom: 1px solid #2d2d2d;
   border-left: 4px solid transparent;
-  transition: all 0.2s;
+  transition: all 0.3s ease-out, transform 0.3s ease-out;
   cursor: pointer;
   background: #252526;
+  position: relative;
+}
+
+.pod-list-row * {
+  pointer-events: auto;
 }
 
 .pod-list-row:hover {
@@ -67,6 +72,11 @@
 .pod-list-separator {
   color: #555;
   font-weight: 300;
+}
+
+.pod-list-context {
+  color: #858585;
+  font-weight: 500;
 }
 
 .pod-list-namespace {
@@ -138,6 +148,37 @@
   font-size: 11px;
   color: #cccccc;
   font-weight: 600;
+  cursor: help;
+  position: relative;
+  display: inline-block;
+}
+
+.pod-count-tooltip {
+  position: fixed;
+  padding: 6px 8px;
+  background: #2d2d2d;
+  border: 0.5px solid #4ec9b0;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 11px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.4;
+  width: max-content;
+  min-width: auto;
+}
+
+.pod-name-item {
+  display: block;
+  padding: 2px 4px;
+  background: #1e1e1e;
+  border-radius: 3px;
+  white-space: nowrap;
+  width: fit-content;
 }
 
 .pod-list-status {

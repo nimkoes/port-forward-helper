@@ -3,12 +3,17 @@ import type { Pod, PortForwardConfig, Service } from '@/types'
 import { generateServiceUrl } from '@/utils/domain'
 import './PodList.css'
 
+interface ServiceWithContext extends Service {
+  context?: string
+}
+
 interface PodListProps {
   pods: Pod[]
   portForwards: Map<string, Map<number, PortForwardConfig>>
   activeContext?: string | null
-  services?: Service[]
+  services?: ServiceWithContext[]
   onPortForwardChange: (
+    context: string,
     serviceName: string,
     namespace: string,
     targetPort: number | string,
@@ -18,6 +23,10 @@ interface PodListProps {
 
 // Service 포트가 HTTP인지 확인하는 함수
 const isHttpServicePort = (servicePort: Service['ports'][0]): boolean => {
+  // grpc 포트는 제외
+  if (servicePort.name && servicePort.name.toLowerCase().includes('grpc')) {
+    return false
+  }
   // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
   if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
     return true
@@ -32,6 +41,7 @@ const isHttpServicePort = (servicePort: Service['ports'][0]): boolean => {
 export const PodList: React.FC<PodListProps> = ({
   pods,
   portForwards,
+  activeContext,
   services = [],
   onPortForwardChange,
 }) => {
@@ -92,6 +102,30 @@ export const PodList: React.FC<PodListProps> = ({
     return count
   }
 
+  // Service의 selector로 매칭되는 Pod 이름 목록 반환
+  const getPodNamesForService = (service: Service): string[] => {
+    if (!service.selector) return []
+
+    const podNames: string[] = []
+    for (const pod of pods) {
+      if (!pod.labels) continue
+      
+      let matches = true
+      for (const [key, value] of Object.entries(service.selector)) {
+        if (pod.labels[key] !== value) {
+          matches = false
+          break
+        }
+      }
+      
+      if (matches && pod.status.toLowerCase() !== 'failed') {
+        podNames.push(pod.name)
+      }
+    }
+
+    return podNames.sort()
+  }
+
   // Service 목록 생성 (ClusterIP 타입이고 http 포트가 있는 것만)
   const serviceList = useMemo(() => {
     const list: Array<{
@@ -100,6 +134,7 @@ export const PodList: React.FC<PodListProps> = ({
       pod?: Pod
       deployment?: string
       portForwards: Map<number, PortForwardConfig>
+      context?: string // 포트포워딩 중인 경우 context 정보
     }> = []
 
     for (const service of services) {
@@ -120,8 +155,14 @@ export const PodList: React.FC<PodListProps> = ({
 
       // 포트포워딩 정보 찾기 (Pod 이름을 키로, Pod가 없으면 Service 이름으로 찾기)
       let podPortForwards = new Map<number, PortForwardConfig>()
+      let portForwardContext: string | undefined
       if (pod) {
         podPortForwards = portForwards.get(pod.name) || new Map()
+        // 활성 포트포워딩이 있으면 context 정보 가져오기
+        const activePortForward = Array.from(podPortForwards.values()).find(pf => pf.active)
+        if (activePortForward) {
+          portForwardContext = activePortForward.context
+        }
       } else {
         // Pod가 없어도 포트포워딩 정보가 있을 수 있음 (이전에 포트포워딩했던 경우)
         // Service 이름으로 매칭되는 Pod를 찾아서 포트포워딩 정보 가져오기
@@ -138,6 +179,11 @@ export const PodList: React.FC<PodListProps> = ({
               }
               if (matches) {
                 podPortForwards = podMap
+                // 활성 포트포워딩이 있으면 context 정보 가져오기
+                const activePortForward = Array.from(podMap.values()).find(pf => pf.active)
+                if (activePortForward) {
+                  portForwardContext = activePortForward.context
+                }
                 break
               }
             }
@@ -145,19 +191,36 @@ export const PodList: React.FC<PodListProps> = ({
         }
       }
 
+      // Service의 context 정보 사용 (포트포워딩 중이면 포트포워딩의 context, 아니면 Service의 context)
+      const serviceContext = portForwardContext || (service as ServiceWithContext).context || activeContext || undefined
+
       list.push({
         service,
         httpPort,
         pod,
         deployment,
         portForwards: podPortForwards,
+        context: serviceContext,
       })
     }
 
-    return list.sort((a, b) => a.service.name.localeCompare(b.service.name))
+    // 포트포워딩이 활성화된 항목을 최상단으로 정렬
+    return list.sort((a, b) => {
+      const aHasActive = Array.from(a.portForwards.values()).some(pf => pf.active)
+      const bHasActive = Array.from(b.portForwards.values()).some(pf => pf.active)
+      
+      // 둘 다 활성화되어 있거나 둘 다 비활성화되어 있으면 이름순 정렬
+      if (aHasActive === bHasActive) {
+        return a.service.name.localeCompare(b.service.name)
+      }
+      
+      // 활성화된 항목이 먼저 오도록
+      return aHasActive ? -1 : 1
+    })
   }, [services, pods, portForwards])
 
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  const [tooltipPodNames, setTooltipPodNames] = useState<{serviceKey: string, podNames: string[], x: number, y: number} | null>(null)
 
   const handleCopyUrl = async (url: string) => {
     try {
@@ -179,7 +242,7 @@ export const PodList: React.FC<PodListProps> = ({
 
   return (
     <div className="pod-list">
-      {serviceList.map(({ service, httpPort, pod, deployment, portForwards: podPortForwards }) => {
+      {serviceList.map(({ service, httpPort, pod, deployment, portForwards: podPortForwards, context: serviceContext }) => {
         // targetPort를 숫자로 변환 (포트포워딩용 - Pod 포트)
         const targetPort = typeof httpPort.targetPort === 'number' 
           ? httpPort.targetPort 
@@ -209,16 +272,22 @@ export const PodList: React.FC<PodListProps> = ({
               }
 
               if (hasActivePortForward && portForwardConfig) {
-                // 비활성화
+                // 비활성화 (포트포워딩 config의 context 사용)
                 onPortForwardChange(
+                  portForwardConfig.context,
                   service.name,
                   service.namespace,
                   httpPort.targetPort,
                   false
                 )
               } else {
-                // 활성화
+                // 활성화 (현재 activeContext 사용)
+                if (!activeContext) {
+                  alert('No active context')
+                  return
+                }
                 onPortForwardChange(
+                  activeContext,
                   service.name,
                   service.namespace,
                   httpPort.targetPort,
@@ -226,7 +295,7 @@ export const PodList: React.FC<PodListProps> = ({
                 )
               }
             }}
-            title={!pod ? 'No matching Pod found' : hasActivePortForward ? 'Click to stop port forwarding' : 'Click to start port forwarding'}
+            title={!pod ? 'No matching Pod found' : ''}
           >
             <div className="pod-list-row-content">
               {hasActivePortForward && portForwardConfig && pod ? (
@@ -234,6 +303,8 @@ export const PodList: React.FC<PodListProps> = ({
                   {/* 활성 상태: 첫 번째 줄 */}
                   <div className="pod-list-row-line">
                     <span className="pod-list-info-line">
+                      <span className="pod-list-context">{portForwardConfig.context}</span>
+                      <span className="pod-list-separator">|</span>
                       <span className="pod-list-namespace">{service.namespace}</span>
                       <span className="pod-list-separator">|</span>
                       <span className="pod-list-deployment">{deployment}</span>
@@ -284,6 +355,8 @@ export const PodList: React.FC<PodListProps> = ({
                   {/* 비활성 상태: 첫 번째 줄 */}
                   <div className="pod-list-row-line">
                     <span className="pod-list-info-line">
+                      <span className="pod-list-context">{serviceContext || '-'}</span>
+                      <span className="pod-list-separator">|</span>
                       <span className="pod-list-namespace">{service.namespace}</span>
                       <span className="pod-list-separator">|</span>
                       <span className="pod-list-deployment">{deployment}</span>
@@ -297,7 +370,43 @@ export const PodList: React.FC<PodListProps> = ({
                   <div className="pod-list-row-line">
                     <span className="pod-list-info-line">
                       <span className="pod-list-pod-count-label">Pod count:</span>
-                      <span className="pod-list-pod-count">{getPodCountForService(service)}</span>
+                      <span 
+                        className="pod-list-pod-count"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                        }}
+                        onMouseEnter={(e) => {
+                          e.stopPropagation()
+                          const podNames = getPodNamesForService(service)
+                          if (podNames.length > 0) {
+                            const serviceKey = `${service.namespace}:${service.name}:${httpPort.port}`
+                            setTooltipPodNames({ 
+                              serviceKey, 
+                              podNames,
+                              x: e.clientX,
+                              y: e.clientY
+                            })
+                          }
+                        }}
+                        onMouseMove={(e) => {
+                          if (tooltipPodNames?.serviceKey === `${service.namespace}:${service.name}:${httpPort.port}`) {
+                            setTooltipPodNames(prev => prev ? {
+                              ...prev,
+                              x: e.clientX,
+                              y: e.clientY
+                            } : null)
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.stopPropagation()
+                          setTooltipPodNames(null)
+                        }}
+                      >
+                        {getPodCountForService(service)}
+                      </span>
                     </span>
                   </div>
                 </>
@@ -306,6 +415,19 @@ export const PodList: React.FC<PodListProps> = ({
           </div>
         )
       })}
+      {tooltipPodNames && (
+        <div 
+          className="pod-count-tooltip"
+          style={{
+            left: `${tooltipPodNames.x + 10}px`,
+            top: `${tooltipPodNames.y + 10}px`,
+          }}
+        >
+          {tooltipPodNames.podNames.map((name, idx) => (
+            <span key={idx} className="pod-name-item">{name}</span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

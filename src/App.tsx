@@ -53,6 +53,7 @@ function App() {
   const [portForwards, setPortForwards] = useState<Map<string, Map<string, Map<string, Map<number, PortForwardConfig>>>>>(new Map())
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [allForwarding, setAllForwarding] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [proxyServerPort, setProxyServerPort] = useState<number | null>(null)
   const proxyServerPortRef = useRef<number | null>(null)
@@ -587,10 +588,9 @@ function App() {
 
   const handleToggleContext = (context: string) => {
     setExpandedContexts(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(context)) {
-        newSet.delete(context)
-      } else {
+      const newSet = new Set<string>()
+      // 이미 열려있는 컨텍스트면 닫고, 아니면 해당 컨텍스트만 열기
+      if (!prev.has(context)) {
         newSet.add(context)
         // 확장 시 activeContext 설정 및 데이터 로드 (포트포워딩은 시작하지 않음)
         setActiveContext(context)
@@ -821,17 +821,16 @@ function App() {
   }, [portForwards, updateProxyAndHosts])
 
   const handlePortForwardChange = useCallback(async (
+    context: string,
     serviceName: string,
     namespace: string,
     targetPort: number | string,
     enabled: boolean
   ) => {
-    if (!activeContext) return
-
-    // Service 찾기
-    const contextServices = servicesByContextAndNamespace.get(activeContext)
+    // Service 찾기 (포트포워딩 해제 시에는 config의 context 사용)
+    const contextServices = servicesByContextAndNamespace.get(context)
     if (!contextServices) {
-      console.error('No services found for context:', activeContext)
+      console.error('No services found for context:', context)
       return
     }
 
@@ -898,7 +897,7 @@ function App() {
       }
 
       const podName = matchedPod.name
-      const configKey = `${activeContext}:${namespace}:${podName}`
+      const configKey = `${context}:${namespace}:${podName}`
 
       // Service 기반 URL 생성 (Service Port 사용)
       // Service에서 해당 targetPort를 가진 포트 찾기
@@ -921,7 +920,7 @@ function App() {
       // 포트포워딩 시작
       try {
         const result = await startPortForward(
-          activeContext,
+          context,
           namespace,
           podName,
           localPort,
@@ -934,7 +933,7 @@ function App() {
 
         const config: PortForwardConfig = {
           id: `${configKey}:${remotePort}`,
-          context: activeContext,
+          context,
           namespace,
           pod: podName,
           localPort: result.localPort,
@@ -946,10 +945,10 @@ function App() {
 
         setPortForwards(prev => {
           const newMap = new Map(prev)
-          if (!newMap.has(activeContext)) {
-            newMap.set(activeContext, new Map())
+          if (!newMap.has(context)) {
+            newMap.set(context, new Map())
           }
-          const contextMap = newMap.get(activeContext)!
+          const contextMap = newMap.get(context)!
           if (!contextMap.has(namespace)) {
             contextMap.set(namespace, new Map())
           }
@@ -1021,7 +1020,7 @@ function App() {
       }
 
       const podName = matchedPod.name
-      const contextMap = portForwards.get(activeContext)
+      const contextMap = portForwards.get(context)
       const namespaceMap = contextMap?.get(namespace)
       const podMap = namespaceMap?.get(podName)
       const config = podMap?.get(remotePort)
@@ -1032,7 +1031,7 @@ function App() {
           
           setPortForwards(prev => {
             const newMap = new Map(prev)
-            const ctxMap = newMap.get(activeContext)
+            const ctxMap = newMap.get(context)
             const nsMap = ctxMap?.get(namespace)
             const pMap = nsMap?.get(podName)
             if (pMap) {
@@ -1042,7 +1041,7 @@ function App() {
                 if (nsMap?.size === 0) {
                   ctxMap?.delete(namespace)
                   if (ctxMap?.size === 0) {
-                    newMap.delete(activeContext)
+                    newMap.delete(context)
                   }
                 }
               }
@@ -1056,6 +1055,183 @@ function App() {
       }
     }
   }, [activeContext, podsByNamespace, portForwards, servicesByContextAndNamespace, activeLocalPorts, findAvailablePort, startPortForward, stopPortForward])
+
+  // HTTP 포트인지 확인하는 함수
+  const isHttpServicePort = useCallback((servicePort: Service['ports'][0]): boolean => {
+    // grpc 포트는 제외
+    if (servicePort.name && servicePort.name.toLowerCase().includes('grpc')) {
+      return false
+    }
+    // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
+    if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
+      return true
+    }
+    // 포트 이름이 없거나 "http"가 포함되지 않았지만, 포트 번호가 80이면 HTTP로 간주
+    if (servicePort.port === 80) {
+      return true
+    }
+    return false
+  }, [])
+
+  // 모든 서비스에 포트포워딩 활성화
+  const handleAllForward = useCallback(async (context: string) => {
+    // 이미 진행 중이면 무시
+    if (allForwarding.has(context)) {
+      return
+    }
+
+    try {
+      setAllForwarding(prev => new Set(prev).add(context))
+      
+      // 해당 context의 모든 namespace 가져오기
+      let allNamespaces = namespacesByContext.get(context) || []
+      if (allNamespaces.length === 0) {
+        // namespace가 없으면 로드 시도
+        const namespaces = await fetchNamespaces(context)
+        if (namespaces.length === 0) {
+          alert('No namespaces found for this context')
+          setAllForwarding(prev => {
+            const next = new Set(prev)
+            next.delete(context)
+            return next
+          })
+          return
+        }
+        allNamespaces = namespaces
+      }
+
+      // 모든 namespace의 services와 pods 로드
+      const namespaceNames = allNamespaces.map(ns => ns.name)
+      await loadPodsForNamespaces(context, namespaceNames, false)
+      
+      // 각 namespace의 services와 pods 가져오기
+      const forwardPromises: Promise<void>[] = []
+      
+      for (const namespace of allNamespaces) {
+        // 이미 로드된 services와 pods 사용
+        const contextServices = servicesByContextAndNamespace.get(context)
+        const namespaceServices = contextServices?.get(namespace.name) || []
+        const namespacePods = podsByNamespace.get(namespace.name) || []
+
+        for (const service of namespaceServices) {
+          // ClusterIP 타입만 허용
+          if (service.type !== 'ClusterIP') {
+            continue
+          }
+
+          // HTTP 포트 찾기
+          const httpPort = service.ports.find(isHttpServicePort)
+          if (!httpPort) {
+            continue
+          }
+
+          // 이미 포트포워딩 중인지 확인
+          const contextMap = portForwards.get(context)
+          const namespaceMap = contextMap?.get(namespace.name)
+          let isAlreadyForwarded = false
+          if (namespaceMap && service.selector) {
+            for (const pod of namespacePods) {
+              if (!pod.labels) continue
+              let matches = true
+              for (const [key, value] of Object.entries(service.selector)) {
+                if (pod.labels[key] !== value) {
+                  matches = false
+                  break
+                }
+              }
+              if (matches) {
+                const podMap = namespaceMap.get(pod.name)
+                if (podMap) {
+                  const targetPort = typeof httpPort.targetPort === 'number' 
+                    ? httpPort.targetPort 
+                    : (pod.ports.find(p => p.name === httpPort.targetPort)?.containerPort || 0)
+                  const existingForward = podMap.get(targetPort)
+                  if (existingForward?.active) {
+                    isAlreadyForwarded = true
+                    break
+                  }
+                }
+              }
+            }
+          }
+
+          if (isAlreadyForwarded) {
+            continue
+          }
+
+          // Service의 selector로 Pod 찾기
+          if (!service.selector) {
+            continue
+          }
+
+          const matchingPods: Pod[] = []
+          for (const pod of namespacePods) {
+            if (!pod.labels || pod.status.toLowerCase() === 'failed') continue
+            
+            let matches = true
+            for (const [key, value] of Object.entries(service.selector)) {
+              if (pod.labels[key] !== value) {
+                matches = false
+                break
+              }
+            }
+            
+            if (matches) {
+              matchingPods.push(pod)
+            }
+          }
+
+          if (matchingPods.length === 0) {
+            continue
+          }
+
+          // 최신 Pod 선택
+          const sortedPods = [...matchingPods].sort((a, b) => {
+            const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
+            const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
+            return bTime - aTime // 최신이 먼저
+          })
+          const matchedPod = sortedPods[0]
+
+          // targetPort를 Pod의 실제 포트 번호로 변환
+          let remotePort: number
+          if (typeof httpPort.targetPort === 'number') {
+            remotePort = httpPort.targetPort
+          } else {
+            const podPort = matchedPod.ports.find(p => p.name === httpPort.targetPort)
+            if (!podPort) {
+              continue
+            }
+            remotePort = podPort.containerPort
+          }
+
+          // 포트포워딩 시작
+          forwardPromises.push(
+            handlePortForwardChange(
+              context,
+              service.name,
+              namespace.name,
+              httpPort.targetPort,
+              true
+            ).catch(error => {
+              console.error(`Failed to forward ${service.name} in ${namespace.name}:`, error)
+            })
+          )
+        }
+      }
+
+      await Promise.all(forwardPromises)
+    } catch (error) {
+      console.error('Failed to forward all services:', error)
+      alert(`Failed to forward all services: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setAllForwarding(prev => {
+        const next = new Set(prev)
+        next.delete(context)
+        return next
+      })
+    }
+  }, [allForwarding, namespacesByContext, servicesByContextAndNamespace, podsByNamespace, portForwards, isHttpServicePort, handlePortForwardChange, fetchNamespaces, loadPodsForNamespaces])
 
 
   // 포트포워딩 중인 Pod의 namespace를 자동으로 로드
@@ -1073,20 +1249,30 @@ function App() {
             if (!podInfo || podInfo.namespace !== namespace) {
               namespacesToLoad.add({ context, namespace })
             }
+            // Service도 로드되지 않았으면 로드 목록에 추가
+            const contextServices = servicesByContextAndNamespace.get(context)
+            const namespaceServices = contextServices?.get(namespace) || []
+            if (namespaceServices.length === 0) {
+              namespacesToLoad.add({ context, namespace })
+            }
           }
         }
       }
     }
     
-    // 필요한 namespace의 Pod 로드
+    // 필요한 namespace의 Pod와 Service 로드
     for (const { context, namespace } of namespacesToLoad) {
       // 이미 로드 중이거나 로드된 namespace는 건너뛰기
       const existingPods = podsByNamespace.get(namespace)
-      if (!existingPods || existingPods.length === 0) {
+      const contextServices = servicesByContextAndNamespace.get(context)
+      const existingServices = contextServices?.get(namespace) || []
+      
+      // Pod나 Service가 없으면 로드
+      if (!existingPods || existingPods.length === 0 || existingServices.length === 0) {
         loadPodsForNamespaces(context, [namespace], false)
       }
     }
-  }, [portForwards, podsByNameMap, podsByNamespace, loadPodsForNamespaces])
+  }, [portForwards, podsByNameMap, podsByNamespace, servicesByContextAndNamespace, loadPodsForNamespaces])
 
   // 현재 컨텍스트의 보이는 네임스페이스의 Pod 목록 + 포트포워딩 중인 모든 Pod
   const visiblePods = React.useMemo(() => {
@@ -1176,23 +1362,80 @@ function App() {
     return result
   }, [portForwards])
 
-  // 현재 컨텍스트의 선택된 namespace의 Service 목록
+  // 현재 컨텍스트의 선택된 namespace의 Service 목록 + 포트포워딩 중인 모든 Service
   const currentServices = React.useMemo(() => {
-    if (!activeContext) return []
-    const contextServices = servicesByContextAndNamespace.get(activeContext)
-    if (!contextServices) return []
+    const allServices: Array<Service & { context?: string }> = []
+    const serviceSet = new Set<string>() // 중복 방지용 (context:namespace:service)
     
-    const visibleNamespaces = getVisibleNamespacesForContext(activeContext)
-    const allServices: Service[] = []
+    if (activeContext) {
+      const contextServices = servicesByContextAndNamespace.get(activeContext)
+      if (contextServices) {
+        const visibleNamespaces = getVisibleNamespacesForContext(activeContext)
+        
+        // 선택된 namespace의 services 포함
+        for (const namespace of visibleNamespaces) {
+          const services = contextServices.get(namespace) || []
+          for (const service of services) {
+            const key = `${activeContext}:${namespace}:${service.name}`
+            if (!serviceSet.has(key)) {
+              serviceSet.add(key)
+              allServices.push({ ...service, context: activeContext })
+            }
+          }
+        }
+      }
+    }
     
-    // 선택된 namespace의 services만 포함
-    for (const namespace of visibleNamespaces) {
-      const services = contextServices.get(namespace) || []
-      allServices.push(...services)
+    // 포트포워딩 중인 Pod의 Service 찾아서 추가 (다른 context/namespace에 있어도)
+    for (const [context, contextMap] of portForwards.entries()) {
+      for (const [namespace, namespaceMap] of contextMap.entries()) {
+        for (const [podName, podMap] of namespaceMap.entries()) {
+          const hasActivePortForward = Array.from(podMap.values()).some(pf => pf.active)
+          if (hasActivePortForward) {
+            // 포트포워딩 중인 Pod 찾기
+            const podInfo = podsByNameMap.get(podName)
+            if (podInfo && podInfo.namespace === namespace) {
+              // 해당 context의 services에서 Pod의 labels와 매칭되는 서비스 찾기
+              const contextServices = servicesByContextAndNamespace.get(context)
+              let foundService = false
+              if (contextServices && podInfo.pod.labels) {
+                const namespaceServices = contextServices.get(namespace) || []
+                for (const service of namespaceServices) {
+                  // Service의 selector로 Pod 매칭 확인
+                  if (service.selector) {
+                    let matches = true
+                    for (const [key, value] of Object.entries(service.selector)) {
+                      if (podInfo.pod.labels![key] !== value) {
+                        matches = false
+                        break
+                      }
+                    }
+                    if (matches) {
+                      const serviceKey = `${context}:${namespace}:${service.name}`
+                      if (!serviceSet.has(serviceKey)) {
+                        serviceSet.add(serviceKey)
+                        allServices.push({ ...service, context })
+                        foundService = true
+                      }
+                    }
+                  }
+                }
+              }
+              
+              // Service를 찾지 못했지만 포트포워딩이 활성화되어 있으면 Service를 로드 시도
+              if (!foundService) {
+                loadPodsForNamespaces(context, [namespace], false).catch(error => {
+                  console.error(`Failed to load services for ${namespace} in ${context}:`, error)
+                })
+              }
+            }
+          }
+        }
+      }
     }
     
     return allServices
-  }, [activeContext, servicesByContextAndNamespace, visibleNamespacesByContext, getVisibleNamespacesForContext])
+  }, [activeContext, servicesByContextAndNamespace, visibleNamespacesByContext, portForwards, podsByNameMap, getVisibleNamespacesForContext])
 
   // 활성 포트포워딩 클릭 시 해당 위치로 스크롤
   const handleScrollToPortForward = useCallback(async (
@@ -1346,7 +1589,9 @@ function App() {
           onDeselectAllNamespaces={handleDeselectAllNamespaces}
           onSelectOnlyNamespace={handleSelectOnlyNamespace}
           onRefresh={handleRefresh}
+          onAllForward={handleAllForward}
           refreshing={refreshing}
+          allForwarding={allForwarding}
         />
         <div className="main-content">
           {error ? (
