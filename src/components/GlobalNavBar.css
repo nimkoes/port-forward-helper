@@ -137,3 +137,74 @@
   border-color: #005a9e;
 }
 
+.gnb-context-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gnb-context-toggle-button {
+  padding: 6px 12px;
+  background: #3e3e42;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gnb-context-toggle-button:hover:not(:disabled) {
+  background: #4a4a4a;
+  border-color: #666;
+  color: #fff;
+}
+
+.gnb-context-toggle-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gnb-context-toggle-button.active {
+  background: #4ec9b0;
+  border-color: #4ec9b0;
+  color: #1e1e1e;
+}
+
+.gnb-context-toggle-button.active:hover:not(:disabled) {
+  background: #3db8a0;
+  border-color: #3db8a0;
+}
+
+.active-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1e1e1e;
+  flex-shrink: 0;
+}
+
+.forwarding-indicator {
+  font-size: 10px;
+  color: #888;
+  font-weight: 400;
+}
+
+.gnb-disable-all-button {
+  background: #d32f2f;
+  border-color: #d32f2f;
+  color: #fff;
+}
+
+.gnb-disable-all-button:hover:not(:disabled) {
+  background: #b71c1c;
+  border-color: #b71c1c;
+}
+

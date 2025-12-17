@@ -54,6 +54,12 @@ try {
     // Kubernetes Client로 Service 목록 조회
     getK8sServices: (context: string, namespace: string) => ipcRenderer.invoke('get-k8s-services', context, namespace),
     
+    // Kubernetes Client로 모든 namespace의 Pod 목록 조회 (최적화)
+    getK8sPodsAll: (context: string) => ipcRenderer.invoke('get-k8s-pods-all', context),
+    
+    // Kubernetes Client로 모든 namespace의 Service 목록 조회 (최적화)
+    getK8sServicesAll: (context: string) => ipcRenderer.invoke('get-k8s-services-all', context),
+    
     // Service 포트포워딩 시작
     startServicePortForward: (config: {
       context: string

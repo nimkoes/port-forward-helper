@@ -1,11 +1,73 @@
 .pod-list {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
   height: 100%;
   min-height: 0;
   background: #1e1e1e;
+}
+
+.pod-list-search {
+  padding: 12px 16px;
+  border-bottom: 1px solid #333;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pod-list-search-input {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  background: #252526;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.pod-list-search-input:focus {
+  border-color: #007acc;
+}
+
+.pod-list-search-input::placeholder {
+  color: #666;
+}
+
+.pod-list-search-clear {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+  padding: 0;
+}
+
+.pod-list-search-clear:hover {
+  color: #ccc;
+}
+
+.pod-list-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+}
+
+.pod-list-search-highlight {
+  background: #4a5568;
+  color: #fff;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
 .pod-list-row {
@@ -46,12 +108,6 @@
 
 .pod-list-row-content {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.pod-list-row-line {
-  display: flex;
   align-items: center;
   width: 100%;
 }
@@ -83,153 +139,47 @@
   color: #858585;
 }
 
-.pod-list-service-name {
+.pod-list-url {
+  font-size: 12px;
   color: #4ec9b0;
-  font-weight: 500;
-}
-
-.pod-list-target-port {
-  color: #dcdcaa;
   font-family: 'Courier New', monospace;
-  font-weight: 600;
-}
-
-.pod-list-port-forward-chain {
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: #cccccc;
-  flex-wrap: wrap;
-  margin-left: auto;
 }
 
-.pod-list-port-label {
-  font-size: 10px;
-  color: #858585;
-  font-weight: 500;
-}
-
-.pod-list-port-value {
-  font-family: 'Courier New', monospace;
-  font-weight: 600;
-  padding: 2px 6px;
-  background: #2a3a3a;
-  border-radius: 3px;
-  color: #cccccc;
-  font-size: 11px;
-}
-
-.pod-list-arrow {
-  color: #4ec9b0;
-  font-weight: bold;
-  font-size: 12px;
-}
-
-.pod-list-pod-name-label {
-  font-size: 11px;
-  color: #858585;
-  font-weight: 500;
-}
-
-.pod-list-pod-name {
-  font-size: 11px;
-  color: #858585;
-  font-family: 'Courier New', monospace;
-}
-
-.pod-list-pod-count-label {
-  font-size: 11px;
-  color: #858585;
-  font-weight: 500;
-}
-
-.pod-list-pod-count {
-  font-size: 11px;
-  color: #cccccc;
-  font-weight: 600;
-  cursor: help;
-  position: relative;
-  display: inline-block;
-}
-
-.pod-count-tooltip {
-  position: fixed;
-  padding: 6px 8px;
-  background: #2d2d2d;
-  border: 0.5px solid #4ec9b0;
-  border-radius: 4px;
-  color: #cccccc;
-  font-size: 11px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.4;
-  width: max-content;
-  min-width: auto;
-}
-
-.pod-name-item {
-  display: block;
-  padding: 2px 4px;
-  background: #1e1e1e;
-  border-radius: 3px;
-  white-space: nowrap;
-  width: fit-content;
-}
-
-.pod-list-status {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 500;
-}
-
-.pod-list-status-running {
-  background: #264f78;
-  color: #4ec9b0;
-}
-
-.pod-list-status-pending {
-  background: #5a4d1f;
-  color: #dcdcaa;
-}
-
-.pod-list-status-failed {
-  background: #5a1f1f;
-  color: #f48771;
-}
-
-.pod-list-url-text {
-  font-size: 11px;
-  color: #4ec9b0;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.pod-list-url-copy-button {
+.pod-list-copy-button {
   background: transparent;
-  border: none;
-  color: #858585;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #888;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 2px;
-  font-size: 12px;
-  transition: all 0.15s;
-  flex-shrink: 0;
+  font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
   min-width: 24px;
   height: 20px;
 }
 
-.pod-list-url-copy-button:hover {
-  background: #2a2d2e;
-  color: #4ec9b0;
+.pod-list-copy-button:hover {
+  background: #3e3e42;
+  border-color: #666;
+  color: #ccc;
+}
+
+.pod-list-copy-button.copied {
+  background: #4ec9b0;
+  border-color: #4ec9b0;
+  color: #1e1e1e;
+}
+
+.pod-list-copy-button:active {
+  transform: scale(0.95);
 }
 
 .pod-list-failure-reason {
@@ -257,4 +207,62 @@
   color: #888;
   font-size: 13px;
   padding: 32px;
+}
+
+.pod-list-context-group {
+  margin-bottom: 8px;
+}
+
+.pod-list-context-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.pod-list-context-header:hover {
+  background: #353535;
+  border-color: #555;
+}
+
+.pod-list-context-icon {
+  font-size: 10px;
+  color: #888;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.pod-list-context-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+}
+
+.pod-list-context-count {
+  font-size: 11px;
+  color: #888;
+  background: #1e1e1e;
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.pod-list-context-items {
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 2px solid #333;
+  margin-left: 6px;
+}
+
+.pod-list-namespace-group {
+  margin-bottom: 4px;
 }

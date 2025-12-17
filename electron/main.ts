@@ -342,6 +342,171 @@ const EXCLUDED_NAMESPACES = [
   'tigera-operator',
 ]
 
+// Kubernetes Client로 모든 namespace의 Pod 목록 조회 (최적화)
+ipcMain.handle('get-k8s-pods-all', async (_, context: string) => {
+  console.log(`[Main] get-k8s-pods-all handler called with context: "${context}"`)
+  try {
+    const { k8sApi } = getKubeClient(context)
+    
+    console.log(`[Main] Calling listPodForAllNamespaces`)
+    let res: any
+    try {
+      res = await k8sApi.listPodForAllNamespaces()
+    } catch (apiError: any) {
+      console.error(`[Main] listPodForAllNamespaces API call failed:`, apiError)
+      throw apiError
+    }
+    
+    const items = (res as any).body?.items || (res as any).items || []
+    const pods = []
+    for (const item of items) {
+      const podName = item.metadata?.name || ''
+      const namespace = item.metadata?.namespace || ''
+      if (!podName || !namespace) continue
+
+      // 제외할 namespace 제외
+      if (EXCLUDED_NAMESPACES.includes(namespace)) continue
+
+      const status = item.status?.phase || 'Unknown'
+      const creationTimestamp = item.metadata?.creationTimestamp
+      const age = creationTimestamp
+        ? calculateAge(creationTimestamp)
+        : 'Unknown'
+
+      // 컨테이너 포트 정보 추출
+      const ports = []
+      const containers = item.spec?.containers || []
+      for (const container of containers) {
+        const containerPorts = container.ports || []
+        for (const port of containerPorts) {
+          ports.push({
+            name: port.name || undefined,
+            containerPort: port.containerPort,
+            protocol: port.protocol || 'TCP',
+          })
+        }
+      }
+
+      // Deployment 이름 추출
+      const deployment = extractDeploymentName(item)
+
+      // Labels 추출
+      const labels = item.metadata?.labels || {}
+
+      // Spec 정보 추출 (포트 매칭을 위해 필요)
+      const spec = {
+        containers: (item.spec?.containers || []).map((container: any) => ({
+          ports: (container.ports || []).map((port: any) => ({
+            name: port.name || undefined,
+            containerPort: port.containerPort,
+            protocol: port.protocol || 'TCP',
+          })),
+        })),
+      }
+
+      pods.push({
+        name: podName,
+        namespace,
+        status,
+        age,
+        ports,
+        deployment,
+        creationTimestamp,
+        labels,
+        spec,
+      })
+    }
+
+    console.log(`[Main] get-k8s-pods-all: Found ${pods.length} pods across all namespaces`)
+    return {
+      success: true,
+      pods,
+      error: null,
+    }
+  } catch (error: any) {
+    console.error(`[Main] get-k8s-pods-all error:`, error)
+    return {
+      success: false,
+      pods: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
+// Kubernetes Client로 모든 namespace의 Service 목록 조회 (최적화)
+ipcMain.handle('get-k8s-services-all', async (_, context: string) => {
+  console.log(`[Main] get-k8s-services-all handler called with context: "${context}"`)
+  try {
+    const { k8sApi } = getKubeClient(context)
+    
+    console.log(`[Main] Calling listServiceForAllNamespaces`)
+    let res: any
+    try {
+      res = await k8sApi.listServiceForAllNamespaces()
+    } catch (apiError: any) {
+      console.error(`[Main] listServiceForAllNamespaces API call failed:`, apiError)
+      throw apiError
+    }
+    
+    const items = (res as any).body?.items || (res as any).items || []
+    const services = []
+    for (const item of items) {
+      const name = item.metadata?.name || ''
+      const namespace = item.metadata?.namespace || ''
+      if (!name || !namespace) continue
+
+      // 제외할 namespace 제외
+      if (EXCLUDED_NAMESPACES.includes(namespace)) continue
+
+      const serviceType = item.spec?.type || ''
+      // ClusterIP 타입만 필터링
+      if (serviceType !== 'ClusterIP') continue
+
+      const clusterIP = item.spec?.clusterIP || ''
+      // clusterIP가 None인 경우 (Headless Service) 제외
+      if (clusterIP === 'None') continue
+
+      // 포트 정보 추출
+      const ports = []
+      const servicePorts = item.spec?.ports || []
+      for (const port of servicePorts) {
+        ports.push({
+          name: port.name || undefined,
+          port: port.port,
+          targetPort: port.targetPort || port.port,
+          protocol: port.protocol || 'TCP',
+        })
+      }
+
+      // Selector 추출
+      const selector = item.spec?.selector || {}
+
+      services.push({
+        name,
+        namespace,
+        type: serviceType,
+        clusterIP,
+        ports,
+        selector: Object.keys(selector).length > 0 ? selector : undefined,
+      })
+    }
+
+    console.log(`[Main] get-k8s-services-all: Found ${services.length} services across all namespaces`)
+    return {
+      success: true,
+      services,
+      error: null,
+    }
+  } catch (error: any) {
+    console.error(`[Main] get-k8s-services-all error:`, error)
+    return {
+      success: false,
+      services: [],
+      error: error.message || String(error),
+    }
+  }
+})
+
 // Kubernetes Client로 Deployment 목록 조회
 ipcMain.handle('get-k8s-deployments', async (_, context: string) => {
   try {

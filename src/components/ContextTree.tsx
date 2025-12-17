@@ -163,9 +163,11 @@ export const ContextTree: React.FC<ContextTreeProps> = ({
               className="tree-all-forward-button"
               onClick={(e) => {
                 e.stopPropagation()
-                onAllForward(context.name)
+                if (!allForwarding.has(context.name)) {
+                  onAllForward(context.name)
+                }
               }}
-              disabled={allForwarding.has(context.name)}
+              disabled={allForwarding.has(context.name) || allForwarding.size > 0}
               title="Forward all services"
             >
               {allForwarding.has(context.name) ? (

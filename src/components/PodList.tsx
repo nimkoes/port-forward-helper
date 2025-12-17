@@ -9,8 +9,7 @@ interface ServiceWithContext extends Service {
 
 interface PodListProps {
   pods: Pod[]
-  portForwards: Map<string, Map<number, PortForwardConfig>>
-  activeContext?: string | null
+  portForwards: Map<string, Map<string, Map<string, Map<number, PortForwardConfig>>>>
   services?: ServiceWithContext[]
   onPortForwardChange: (
     context: string,
@@ -35,16 +34,40 @@ const isHttpServicePort = (servicePort: Service['ports'][0]): boolean => {
   if (servicePort.port === 80) {
     return true
   }
+  // 포트 이름이 없거나 빈 문자열인 경우 HTTP로 간주 (grpc가 아닌 경우)
+  if (!servicePort.name || servicePort.name.trim() === '' || servicePort.name === '<unset>') {
+    return true
+  }
+  // 일반적인 HTTP 포트 번호들도 HTTP로 간주
+  const commonHttpPorts = [80, 8080, 3000, 8000, 5000, 4000, 9000]
+  if (commonHttpPorts.includes(servicePort.port)) {
+    return true
+  }
   return false
 }
 
 export const PodList: React.FC<PodListProps> = ({
   pods,
   portForwards,
-  activeContext,
   services = [],
   onPortForwardChange,
 }) => {
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  
+  // URL 복사 함수
+  const handleCopyUrl = async (url: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(`http://${url}`)
+      setCopiedUrl(url)
+      setTimeout(() => setCopiedUrl(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy URL:', error)
+    }
+  }
+  
   // Service의 selector로 매칭되는 Pod 찾기 (최신 Pod 선택)
   const findLatestPodForService = (service: Service): Pod | undefined => {
     if (!service.selector) return undefined
@@ -78,53 +101,6 @@ export const PodList: React.FC<PodListProps> = ({
     return sortedPods[0]
   }
 
-  // Service의 selector로 매칭되는 Pod 개수 계산
-  const getPodCountForService = (service: Service): number => {
-    if (!service.selector) return 0
-
-    let count = 0
-    for (const pod of pods) {
-      if (!pod.labels) continue
-      
-      let matches = true
-      for (const [key, value] of Object.entries(service.selector)) {
-        if (pod.labels[key] !== value) {
-          matches = false
-          break
-        }
-      }
-      
-      if (matches && pod.status.toLowerCase() !== 'failed') {
-        count++
-      }
-    }
-
-    return count
-  }
-
-  // Service의 selector로 매칭되는 Pod 이름 목록 반환
-  const getPodNamesForService = (service: Service): string[] => {
-    if (!service.selector) return []
-
-    const podNames: string[] = []
-    for (const pod of pods) {
-      if (!pod.labels) continue
-      
-      let matches = true
-      for (const [key, value] of Object.entries(service.selector)) {
-        if (pod.labels[key] !== value) {
-          matches = false
-          break
-        }
-      }
-      
-      if (matches && pod.status.toLowerCase() !== 'failed') {
-        podNames.push(pod.name)
-      }
-    }
-
-    return podNames.sort()
-  }
 
   // Service 목록 생성 (ClusterIP 타입이고 http 포트가 있는 것만)
   const serviceList = useMemo(() => {
@@ -153,46 +129,28 @@ export const PodList: React.FC<PodListProps> = ({
       const pod = findLatestPodForService(service)
       const deployment = pod?.deployment || service.name
 
-      // 포트포워딩 정보 찾기 (Pod 이름을 키로, Pod가 없으면 Service 이름으로 찾기)
+      // 포트포워딩 정보 찾기 (모든 context에서 검색)
       let podPortForwards = new Map<number, PortForwardConfig>()
       let portForwardContext: string | undefined
-      if (pod) {
-        podPortForwards = portForwards.get(pod.name) || new Map()
-        // 활성 포트포워딩이 있으면 context 정보 가져오기
-        const activePortForward = Array.from(podPortForwards.values()).find(pf => pf.active)
-        if (activePortForward) {
-          portForwardContext = activePortForward.context
-        }
-      } else {
-        // Pod가 없어도 포트포워딩 정보가 있을 수 있음 (이전에 포트포워딩했던 경우)
-        // Service 이름으로 매칭되는 Pod를 찾아서 포트포워딩 정보 가져오기
-        for (const [podName, podMap] of portForwards.entries()) {
-          const podInfo = pods.find(p => p.name === podName && p.namespace === service.namespace)
-          if (podInfo && service.selector) {
-            let matches = true
-            if (podInfo.labels) {
-              for (const [key, value] of Object.entries(service.selector)) {
-                if (podInfo.labels[key] !== value) {
-                  matches = false
-                  break
-                }
-              }
-              if (matches) {
-                podPortForwards = podMap
-                // 활성 포트포워딩이 있으면 context 정보 가져오기
-                const activePortForward = Array.from(podMap.values()).find(pf => pf.active)
-                if (activePortForward) {
-                  portForwardContext = activePortForward.context
-                }
-                break
-              }
+      const serviceContext = (service as ServiceWithContext).context
+      
+      if (pod && serviceContext) {
+        const contextMap = portForwards.get(serviceContext)
+        if (contextMap) {
+          const namespaceMap = contextMap.get(service.namespace)
+          if (namespaceMap) {
+            podPortForwards = namespaceMap.get(pod.name) || new Map()
+            // 활성 포트포워딩이 있으면 context 정보 가져오기
+            const activePortForward = Array.from(podPortForwards.values()).find(pf => pf.active)
+            if (activePortForward) {
+              portForwardContext = activePortForward.context
             }
           }
         }
       }
-
+      
       // Service의 context 정보 사용 (포트포워딩 중이면 포트포워딩의 context, 아니면 Service의 context)
-      const serviceContext = portForwardContext || (service as ServiceWithContext).context || activeContext || undefined
+      const finalContext = portForwardContext || serviceContext
 
       list.push({
         service,
@@ -200,37 +158,99 @@ export const PodList: React.FC<PodListProps> = ({
         pod,
         deployment,
         portForwards: podPortForwards,
-        context: serviceContext,
+        context: finalContext,
       })
     }
 
-    // 포트포워딩이 활성화된 항목을 최상단으로 정렬
+    // Context, Namespace, Deployment, Pod 이름 기준으로 정렬 (포트포워딩 활성화 여부와 무관)
     return list.sort((a, b) => {
-      const aHasActive = Array.from(a.portForwards.values()).some(pf => pf.active)
-      const bHasActive = Array.from(b.portForwards.values()).some(pf => pf.active)
-      
-      // 둘 다 활성화되어 있거나 둘 다 비활성화되어 있으면 이름순 정렬
-      if (aHasActive === bHasActive) {
-        return a.service.name.localeCompare(b.service.name)
+      // Context 비교
+      const contextA = a.context || ''
+      const contextB = b.context || ''
+      if (contextA !== contextB) {
+        return contextA.localeCompare(contextB)
       }
       
-      // 활성화된 항목이 먼저 오도록
-      return aHasActive ? -1 : 1
+      // Namespace 비교
+      const nsA = a.service.namespace
+      const nsB = b.service.namespace
+      if (nsA !== nsB) {
+        return nsA.localeCompare(nsB)
+      }
+      
+      // Deployment 비교
+      const depA = a.deployment || ''
+      const depB = b.deployment || ''
+      if (depA !== depB) {
+        return depA.localeCompare(depB)
+      }
+      
+      // Pod 이름 비교
+      const podA = a.pod?.name || ''
+      const podB = b.pod?.name || ''
+      return podA.localeCompare(podB)
     })
   }, [services, pods, portForwards])
 
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
-  const [tooltipPodNames, setTooltipPodNames] = useState<{serviceKey: string, podNames: string[], x: number, y: number} | null>(null)
-
-  const handleCopyUrl = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopiedUrl(url)
-      setTimeout(() => setCopiedUrl(null), 2000)
-    } catch (error) {
-      console.error('Failed to copy URL:', error)
+  // Context별로 그룹핑
+  const groupedByContext = useMemo(() => {
+    const groups = new Map<string, typeof serviceList>()
+    for (const item of serviceList) {
+      const context = item.context || 'unknown'
+      if (!groups.has(context)) {
+        groups.set(context, [])
+      }
+      groups.get(context)!.push(item)
     }
-  }
+    return groups
+  }, [serviceList])
+
+  // 검색 필터링
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return groupedByContext
+    }
+    
+    const query = searchQuery.toLowerCase()
+    const filtered = new Map<string, typeof serviceList>()
+    
+    for (const [context, items] of groupedByContext.entries()) {
+      const matching = items.filter(item => 
+        context.toLowerCase().includes(query) ||
+        item.service.namespace.toLowerCase().includes(query) ||
+        (item.deployment || '').toLowerCase().includes(query) ||
+        (item.pod?.name || '').toLowerCase().includes(query) ||
+        item.httpPort.port.toString().includes(query)
+      )
+      
+      if (matching.length > 0) {
+        filtered.set(context, matching)
+      }
+    }
+    
+    return filtered
+  }, [groupedByContext, searchQuery])
+
+  // 검색 시 자동 펼치기
+  React.useEffect(() => {
+    if (searchQuery.trim()) {
+      setExpandedContexts(new Set(filteredGroups.keys()))
+    }
+  }, [searchQuery, filteredGroups])
+
+  // Context 펼치기/접기 토글
+  const toggleContext = React.useCallback((context: string) => {
+    setExpandedContexts(prev => {
+      const next = new Set(prev)
+      if (next.has(context)) {
+        next.delete(context)
+      } else {
+        next.add(context)
+      }
+      return next
+    })
+  }, [])
+
 
   if (serviceList.length === 0) {
     return (
@@ -239,195 +259,169 @@ export const PodList: React.FC<PodListProps> = ({
       </div>
     )
   }
+  
+  // 검색어 하이라이트 함수
+  const highlightText = (text: string, query: string): React.ReactNode => {
+    if (!query.trim()) {
+      return text
+    }
+    
+    const parts = text.split(new RegExp(`(${query})`, 'gi'))
+    return parts.map((part, index) => 
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={index} className="pod-list-search-highlight">{part}</mark>
+      ) : (
+        part
+      )
+    )
+  }
 
   return (
     <div className="pod-list">
-      {serviceList.map(({ service, httpPort, pod, deployment, portForwards: podPortForwards, context: serviceContext }) => {
-        // targetPort를 숫자로 변환 (포트포워딩용 - Pod 포트)
-        const targetPort = typeof httpPort.targetPort === 'number' 
-          ? httpPort.targetPort 
-          : (pod?.ports.find(p => p.name === httpPort.targetPort)?.containerPort || 0)
-
-        // Service Port (표시 및 URL 생성용)
-        const servicePort = httpPort.port
-
-        // 활성 포트포워딩 찾기 (targetPort로 매칭 - Pod 포트)
-        const activePortForward = Array.from(podPortForwards.entries())
-          .find(([port, pf]) => pf.active && port === targetPort)
-
-        const hasActivePortForward = !!activePortForward
-        const portForwardConfig = activePortForward?.[1]
-
-        // URL 생성 (Service Port 사용)
-        const serviceUrl = generateServiceUrl(service.name, service.namespace, servicePort)
-
-        return (
-          <div 
-            key={`${service.namespace}:${service.name}:${httpPort.port}`}
-            className={`pod-list-row ${hasActivePortForward ? 'has-port-forward' : ''} ${!pod ? 'no-pod' : ''}`}
-            onClick={() => {
-              if (!pod) {
-                alert('No matching Pod found for this Service')
-                return
-              }
-
-              if (hasActivePortForward && portForwardConfig) {
-                // 비활성화 (포트포워딩 config의 context 사용)
-                onPortForwardChange(
-                  portForwardConfig.context,
-                  service.name,
-                  service.namespace,
-                  httpPort.targetPort,
-                  false
-                )
-              } else {
-                // 활성화 (현재 activeContext 사용)
-                if (!activeContext) {
-                  alert('No active context')
-                  return
-                }
-                onPortForwardChange(
-                  activeContext,
-                  service.name,
-                  service.namespace,
-                  httpPort.targetPort,
-                  true
-                )
-              }
-            }}
-            title={!pod ? 'No matching Pod found' : ''}
+      <div className="pod-list-search">
+        <input
+          type="text"
+          className="pod-list-search-input"
+          placeholder="Search by context, namespace, deployment, pod, port..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <button
+            className="pod-list-search-clear"
+            onClick={() => setSearchQuery('')}
+            title="Clear search"
           >
-            <div className="pod-list-row-content">
-              {hasActivePortForward && portForwardConfig && pod ? (
-                <>
-                  {/* 활성 상태: 첫 번째 줄 */}
-                  <div className="pod-list-row-line">
-                    <span className="pod-list-info-line">
-                      <span className="pod-list-context">{portForwardConfig.context}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-namespace">{service.namespace}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-deployment">{deployment}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-port-forward-chain">
-                        <span className="pod-list-port-label">Loc:</span>
-                        <span className="pod-list-port-value">{portForwardConfig.localPort}</span>
-                        <span className="pod-list-arrow">→</span>
-                        <span className="pod-list-port-label">Pod:</span>
-                        <span className="pod-list-port-value">{targetPort}</span>
-                        <span className="pod-list-arrow">→</span>
-                        <span className="pod-list-port-label">Svc:</span>
-                        <span className="pod-list-port-value">{httpPort.port}</span>
-                      </span>
-                    </span>
-                  </div>
-                  {/* 활성 상태: 두 번째 줄 */}
-                  <div className="pod-list-row-line">
-                    <span className="pod-list-info-line">
-                      <span className="pod-list-pod-name-label">Pod:</span>
-                      <span className="pod-list-pod-name">{pod.name}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className={`pod-list-status pod-list-status-${pod.status.toLowerCase()}`}>
-                        {pod.status}
-                      </span>
-                      {portForwardConfig.domain && (
-                        <>
-                          <span className="pod-list-separator">|</span>
-                          <span className="pod-list-url-text">{portForwardConfig.domain}</span>
-                          <button
-                            className="pod-list-url-copy-button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const url = `http://${portForwardConfig.domain}`
-                              handleCopyUrl(url)
-                            }}
-                            title="Copy URL"
-                          >
-                            {copiedUrl === `http://${portForwardConfig.domain}` ? '✓' : '📋'}
-                          </button>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* 비활성 상태: 첫 번째 줄 */}
-                  <div className="pod-list-row-line">
-                    <span className="pod-list-info-line">
-                      <span className="pod-list-context">{serviceContext || '-'}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-namespace">{service.namespace}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-deployment">{deployment}</span>
-                      <span className="pod-list-separator">|</span>
-                      <span className="pod-list-service-name">{service.name}</span>
-                      <span className="pod-list-separator">:</span>
-                      <span className="pod-list-target-port">{servicePort}</span>
-                    </span>
-                  </div>
-                  {/* 비활성 상태: 두 번째 줄 */}
-                  <div className="pod-list-row-line">
-                    <span className="pod-list-info-line">
-                      <span className="pod-list-pod-count-label">Pod count:</span>
-                      <span 
-                        className="pod-list-pod-count"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                        }}
-                        onMouseDown={(e) => {
-                          e.stopPropagation()
-                        }}
-                        onMouseEnter={(e) => {
-                          e.stopPropagation()
-                          const podNames = getPodNamesForService(service)
-                          if (podNames.length > 0) {
-                            const serviceKey = `${service.namespace}:${service.name}:${httpPort.port}`
-                            setTooltipPodNames({ 
-                              serviceKey, 
-                              podNames,
-                              x: e.clientX,
-                              y: e.clientY
-                            })
-                          }
-                        }}
-                        onMouseMove={(e) => {
-                          if (tooltipPodNames?.serviceKey === `${service.namespace}:${service.name}:${httpPort.port}`) {
-                            setTooltipPodNames(prev => prev ? {
-                              ...prev,
-                              x: e.clientX,
-                              y: e.clientY
-                            } : null)
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          e.stopPropagation()
-                          setTooltipPodNames(null)
-                        }}
-                      >
-                        {getPodCountForService(service)}
-                      </span>
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
+            ×
+          </button>
+        )}
+      </div>
+      <div className="pod-list-content">
+        {filteredGroups.size === 0 ? (
+          <div className="pod-list-empty">
+            <p>No matching services</p>
           </div>
-        )
-      })}
-      {tooltipPodNames && (
-        <div 
-          className="pod-count-tooltip"
-          style={{
-            left: `${tooltipPodNames.x + 10}px`,
-            top: `${tooltipPodNames.y + 10}px`,
-          }}
-        >
-          {tooltipPodNames.podNames.map((name, idx) => (
-            <span key={idx} className="pod-name-item">{name}</span>
-          ))}
-        </div>
-      )}
+        ) : (
+          <>
+            {Array.from(filteredGroups.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([context, items]) => {
+              const isExpanded = expandedContexts.has(context)
+              
+              // Namespace별로 그룹핑
+              const namespaceGroups = new Map<string, typeof items>()
+              for (const item of items) {
+                const namespace = item.service.namespace
+                if (!namespaceGroups.has(namespace)) {
+                  namespaceGroups.set(namespace, [])
+                }
+                namespaceGroups.get(namespace)!.push(item)
+              }
+              
+              return (
+                <div key={context} className="pod-list-context-group">
+                  <div
+                    className="pod-list-context-header"
+                    onClick={() => toggleContext(context)}
+                  >
+                    <span className="pod-list-context-icon">
+                      {isExpanded ? '▼' : '▶'}
+                    </span>
+                    <span className="pod-list-context-name">
+                      {highlightText(context, searchQuery)}
+                    </span>
+                    <span className="pod-list-context-count">({items.length})</span>
+                  </div>
+                  {isExpanded && (
+                    <div className="pod-list-context-items">
+                      {Array.from(namespaceGroups.entries())
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([namespace, namespaceItems]) => (
+                          <div key={namespace} className="pod-list-namespace-group">
+                            {namespaceItems.map(({ service, httpPort, pod, deployment, portForwards: podPortForwards, context: serviceContext }) => {
+                              // targetPort를 숫자로 변환 (포트포워딩용 - Pod 포트)
+                              const targetPort = typeof httpPort.targetPort === 'number' 
+                                ? httpPort.targetPort 
+                                : (pod?.ports.find(p => p.name === httpPort.targetPort)?.containerPort || 0)
+
+                              // Service Port (표시 및 URL 생성용)
+                              const servicePort = httpPort.port
+
+                              // 활성 포트포워딩 찾기 (targetPort로 매칭 - Pod 포트)
+                              const activePortForward = Array.from(podPortForwards.entries())
+                                .find(([port, pf]) => pf.active && port === targetPort)
+
+                              const hasActivePortForward = !!activePortForward
+                              const portForwardConfig = activePortForward?.[1]
+
+                              // URL 생성 (활성 포트포워딩이 있으면 그 domain 사용, 없으면 생성)
+                              const serviceUrl = portForwardConfig?.domain 
+                                ? portForwardConfig.domain 
+                                : generateServiceUrl(service.name, service.namespace, servicePort)
+
+          return (
+                                <div 
+                                  key={`${service.namespace}:${service.name}:${httpPort.port}`}
+                                  className={`pod-list-row ${hasActivePortForward ? 'has-port-forward' : ''} ${!pod ? 'no-pod' : ''}`}
+                                  onClick={() => {
+                                    // Pod가 없어도 포트포워딩 시도 (handlePortForwardChange에서 처리)
+                                    if (hasActivePortForward && portForwardConfig) {
+                                      // 비활성화 (포트포워딩 config의 context 사용)
+                                      onPortForwardChange(
+                                        portForwardConfig.context,
+                                        service.name,
+                                        service.namespace,
+                                        httpPort.targetPort,
+                                        false
+                                      )
+                                    } else {
+                                      // 활성화 (Service의 context 사용)
+                                      if (!serviceContext) {
+                                        alert('No context available')
+                                        return
+                                      }
+                                      // Pod가 없어도 시도
+                                      onPortForwardChange(
+                                        serviceContext,
+                                        service.name,
+                                        service.namespace,
+                                        httpPort.targetPort,
+                                        true
+                                      )
+                                    }
+                                  }}
+                                >
+                                  <div className="pod-list-row-content">
+                                    <span className="pod-list-info-line">
+                                      <span className="pod-list-context">{highlightText(serviceContext || '-', searchQuery)}</span>
+                                      <span className="pod-list-separator">|</span>
+                                      <span className="pod-list-namespace">{highlightText(service.namespace, searchQuery)}</span>
+                                      <span className="pod-list-separator">|</span>
+                                      <span className="pod-list-deployment">{highlightText(deployment, searchQuery)}</span>
+                                      <span className="pod-list-separator">|</span>
+                                      <span className="pod-list-url">{highlightText(serviceUrl, searchQuery)}</span>
+                                      <button
+                                        className={`pod-list-copy-button ${copiedUrl === serviceUrl ? 'copied' : ''}`}
+                                        onClick={(e) => handleCopyUrl(serviceUrl, e)}
+                                        title={copiedUrl === serviceUrl ? 'Copied!' : 'Copy URL'}
+                                      >
+                                        {copiedUrl === serviceUrl ? '✓' : '📋'}
+                                      </button>
+                </span>
+              </div>
+            </div>
+          )
+                            })}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )
+              })}
+          </>
+        )}
+      </div>
     </div>
   )
 }

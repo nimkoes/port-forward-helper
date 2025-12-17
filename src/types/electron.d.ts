@@ -126,6 +126,50 @@ export interface ElectronAPI {
     }>
     error: string | null
   }>
+  getK8sPodsAll: (context: string) => Promise<{
+    success: boolean
+    pods: Array<{
+      name: string
+      namespace: string
+      status: string
+      age: string
+      ports: Array<{
+        name?: string
+        containerPort: number
+        protocol: string
+      }>
+      deployment?: string
+      creationTimestamp?: string
+      labels?: Record<string, string>
+      spec?: {
+        containers?: Array<{
+          ports?: Array<{
+            name?: string
+            containerPort: number
+            protocol?: string
+          }>
+        }>
+      }
+    }>
+    error: string | null
+  }>
+  getK8sServicesAll: (context: string) => Promise<{
+    success: boolean
+    services: Array<{
+      name: string
+      namespace: string
+      type: string
+      clusterIP?: string
+      ports: Array<{
+        name?: string
+        port: number
+        targetPort: number | string
+        protocol: string
+      }>
+      selector?: Record<string, string>
+    }>
+    error: string | null
+  }>
   startServicePortForward: (config: {
     context: string
     namespace: string

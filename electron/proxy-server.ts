@@ -29,9 +29,20 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
     // 라우팅 키 생성: host:port 형식 (포트가 80이면 host만 사용)
     const routeKey = requestPort === 80 ? host : `${host}:${requestPort}`
     
+    // 디버깅: 요청 정보 로깅
+    console.log(`[Proxy Server] Request received:`, {
+      hostHeader,
+      host,
+      requestPort,
+      routeKey,
+      availableRoutes: Array.from(routes.keys()),
+      url: req.url,
+    })
+    
     // 먼저 정확한 키로 찾기
     if (routes.has(routeKey)) {
       const targetPort = routes.get(routeKey)!
+      console.log(`[Proxy Server] Route found: ${routeKey} -> localhost:${targetPort}`)
       const proxy = createProxyMiddleware({
         target: `http://localhost:${targetPort}`,
         changeOrigin: true,
@@ -43,6 +54,7 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
     // 포트가 80이 아니고 정확한 키를 찾지 못한 경우, host만으로도 시도
     if (requestPort !== 80 && routes.has(host)) {
       const targetPort = routes.get(host)!
+      console.log(`[Proxy Server] Route found (host only): ${host} -> localhost:${targetPort}`)
       const proxy = createProxyMiddleware({
         target: `http://localhost:${targetPort}`,
         changeOrigin: true,
@@ -52,7 +64,9 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
     }
     
     // 라우팅이 없으면 404
-    res.status(404).send(`No route found for this domain: ${routeKey}`)
+    console.error(`[Proxy Server] No route found for: ${routeKey}`)
+    console.error(`[Proxy Server] Available routes:`, Array.from(routes.entries()))
+    res.status(404).send(`No route found for this domain: ${routeKey}\nAvailable routes: ${Array.from(routes.keys()).join(', ')}`)
   })
 
   // 포트 시도: preferredPort부터 시작, 실패하면 portfinder로 사용 가능한 포트 찾기
@@ -159,6 +173,7 @@ export function updateRoutes(newRoutes: Map<string, number>): void {
     routes.set(domain, port)
   }
   console.log(`[Proxy Server] Updated routes: ${routes.size} routes`)
+  console.log(`[Proxy Server] Route details:`, Array.from(routes.entries()).map(([domain, port]) => `${domain} -> localhost:${port}`).join(', '))
 }
 
 /**
