@@ -63,6 +63,22 @@ export async function startProxyServer(preferredPort: number = 80): Promise<numb
       return proxy(req, res, next)
     }
     
+    // host:port 형식의 키도 찾기 (포트가 80인 경우 host로 접속했지만 라우팅 테이블에는 host:port가 있을 수 있음)
+    // 라우팅 테이블의 모든 키를 확인하여 host 부분이 일치하는지 확인
+    for (const [storedKey, targetPort] of routes.entries()) {
+      const [storedHost] = storedKey.split(':')
+      // 저장된 키의 host 부분이 현재 요청의 host와 일치하는지 확인
+      if (storedHost === host) {
+        console.log(`[Proxy Server] Route found (host match): ${storedKey} -> localhost:${targetPort}`)
+        const proxy = createProxyMiddleware({
+          target: `http://localhost:${targetPort}`,
+          changeOrigin: true,
+          logLevel: 'silent',
+        })
+        return proxy(req, res, next)
+      }
+    }
+    
     // 라우팅이 없으면 404
     console.error(`[Proxy Server] No route found for: ${routeKey}`)
     console.error(`[Proxy Server] Available routes:`, Array.from(routes.entries()))
