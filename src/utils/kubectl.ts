@@ -1,24 +1,7 @@
 import type { KubernetesContext, Namespace, Pod, ContainerPort, Deployment, Service } from '@/types'
-
-// 제외할 namespace 목록 (시스템 + 사용자 지정)
-const EXCLUDED_NAMESPACES = [
-  // 시스템 namespace
-  'kube-system',
-  'kube-public',
-  'kube-node-lease',
-  // 사용자 지정 제외 namespace
-  'default',
-  'argocd',
-  'azp',
-  'calico-system',
-  'gateway',
-  'migx',
-  'projectcontour',
-  'submarine',
-  'submarine-acct',
-  'test-ui',
-  'tigera-operator',
-]
+import { EXCLUDED_NAMESPACES } from '@/constants/namespaces'
+import { calculateAge } from './date'
+import { extractDeploymentName } from './pod'
 
 export async function getContexts(): Promise<KubernetesContext[]> {
   // electronAPI가 로드될 때까지 대기 (최대 5초)
@@ -237,59 +220,8 @@ export async function getPods(context: string, namespace: string): Promise<Pod[]
   }
 }
 
-function calculateAge(creationTimestamp?: string): string {
-  if (!creationTimestamp) return 'Unknown'
+import { calculateAge } from './date'
 
-  try {
-    const created = new Date(creationTimestamp).getTime()
-    const now = Date.now()
-    const diffMs = now - created
-    const diffSecs = Math.floor(diffMs / 1000)
-    const diffMins = Math.floor(diffSecs / 60)
-    const diffHours = Math.floor(diffMins / 60)
-    const diffDays = Math.floor(diffHours / 24)
-
-    if (diffDays > 0) return `${diffDays}d`
-    if (diffHours > 0) return `${diffHours}h`
-    if (diffMins > 0) return `${diffMins}m`
-    return `${diffSecs}s`
-  } catch {
-    return 'Unknown'
-  }
-}
-
-/**
- * Pod의 metadata에서 Deployment 이름을 추출합니다.
- * ownerReferences를 통해 ReplicaSet을 찾고, ReplicaSet의 ownerReferences에서 Deployment를 찾습니다.
- * Deployment를 찾지 못하면 Pod 이름을 반환합니다.
- */
-function extractDeploymentName(podItem: any): string {
-  try {
-    const ownerReferences = podItem.metadata?.ownerReferences || []
-    
-    // ReplicaSet 찾기
-    for (const owner of ownerReferences) {
-      if (owner.kind === 'ReplicaSet') {
-        // ReplicaSet의 이름에서 Deployment 이름 추출
-        // ReplicaSet 이름 형식: <deployment-name>-<hash>
-        const replicaSetName = owner.name || ''
-        // 마지막 하이픈을 기준으로 분리하여 Deployment 이름 추출
-        const lastDashIndex = replicaSetName.lastIndexOf('-')
-        if (lastDashIndex > 0) {
-          const deploymentName = replicaSetName.substring(0, lastDashIndex)
-          return deploymentName
-        }
-      }
-    }
-    
-    // ReplicaSet을 찾지 못했거나 이름 형식이 예상과 다를 경우
-    // Pod 이름을 deployment로 사용
-    return podItem.metadata?.name || ''
-  } catch (error) {
-    // 에러 발생 시 Pod 이름 반환
-    return podItem.metadata?.name || ''
-  }
-}
 
 export async function getDeployments(context: string): Promise<Deployment[]> {
   if (!window.electronAPI) {

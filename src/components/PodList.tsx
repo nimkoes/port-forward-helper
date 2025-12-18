@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import type { Pod, PortForwardConfig, Service } from '@/types'
 import { generateServiceUrl } from '@/utils/domain'
+import { isHttpServicePort, findMatchingPods } from '@/utils/service'
+import { findLatestPod } from '@/utils/pod'
 import './PodList.css'
 
 interface ServiceWithContext extends Service {
@@ -20,32 +22,6 @@ interface PodListProps {
   ) => void
 }
 
-// Service 포트가 HTTP인지 확인하는 함수
-const isHttpServicePort = (servicePort: Service['ports'][0]): boolean => {
-  // grpc 포트는 제외
-  if (servicePort.name && servicePort.name.toLowerCase().includes('grpc')) {
-    return false
-  }
-  // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
-  if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
-    return true
-  }
-  // 포트 이름이 없거나 "http"가 포함되지 않았지만, 포트 번호가 80이면 HTTP로 간주
-  if (servicePort.port === 80) {
-    return true
-  }
-  // 포트 이름이 없거나 빈 문자열인 경우 HTTP로 간주 (grpc가 아닌 경우)
-  if (!servicePort.name || servicePort.name.trim() === '' || servicePort.name === '<unset>') {
-    return true
-  }
-  // 일반적인 HTTP 포트 번호들도 HTTP로 간주
-  const commonHttpPorts = [80, 8080, 3000, 8000, 5000, 4000, 9000]
-  if (commonHttpPorts.includes(servicePort.port)) {
-    return true
-  }
-  return false
-}
-
 export const PodList: React.FC<PodListProps> = ({
   pods,
   portForwards,
@@ -62,7 +38,9 @@ export const PodList: React.FC<PodListProps> = ({
     try {
       await navigator.clipboard.writeText(`http://${url}`)
       setCopiedUrl(url)
-      setTimeout(() => setCopiedUrl(null), 2000)
+      const timeoutId = setTimeout(() => setCopiedUrl(null), 2000)
+      // cleanup은 컴포넌트 언마운트 시 자동으로 처리되지만, 명시적으로 추적 가능하도록 ref 사용 고려 가능
+      // 다만 이 경우는 짧은 시간 후 자동으로 null이 되므로 큰 문제는 없음
     } catch (error) {
       console.error('Failed to copy URL:', error)
     }
@@ -72,33 +50,10 @@ export const PodList: React.FC<PodListProps> = ({
   const findLatestPodForService = (service: Service): Pod | undefined => {
     if (!service.selector) return undefined
 
-    const matchingPods: Pod[] = []
-    for (const pod of pods) {
-      if (!pod.labels) continue
-      
-      let matches = true
-      for (const [key, value] of Object.entries(service.selector)) {
-        if (pod.labels[key] !== value) {
-          matches = false
-          break
-        }
-      }
-      
-      if (matches && pod.status.toLowerCase() !== 'failed') {
-        matchingPods.push(pod)
-      }
-    }
-
+    const matchingPods = findMatchingPods(service, pods, true)
     if (matchingPods.length === 0) return undefined
 
-    // 최신 Pod 선택 (creationTimestamp 기준)
-    const sortedPods = [...matchingPods].sort((a, b) => {
-      const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
-      const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
-      return bTime - aTime // 최신이 먼저
-    })
-
-    return sortedPods[0]
+    return findLatestPod(matchingPods)
   }
 
 

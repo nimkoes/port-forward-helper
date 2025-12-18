@@ -238,10 +238,4 @@ export class HostsManager {
     }
   }
 
-  /**
-   * 현재 추가된 도메인 목록을 반환합니다.
-   */
-  getAddedHosts(): string[] {
-    return [...this.addedHosts]
-  }
 }

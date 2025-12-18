@@ -149,22 +149,6 @@ export async function stopProxyServer(): Promise<void> {
 }
 
 /**
- * 라우팅을 추가합니다.
- */
-export function addRoute(domain: string, localPort: number): void {
-  routes.set(domain, localPort)
-  console.log(`[Proxy Server] Added route: ${domain} -> localhost:${localPort}`)
-}
-
-/**
- * 라우팅을 제거합니다.
- */
-export function removeRoute(domain: string): void {
-  routes.delete(domain)
-  console.log(`[Proxy Server] Removed route: ${domain}`)
-}
-
-/**
  * 모든 라우팅을 업데이트합니다.
  */
 export function updateRoutes(newRoutes: Map<string, number>): void {
@@ -181,12 +165,5 @@ export function updateRoutes(newRoutes: Map<string, number>): void {
  */
 export function getServerPort(): number | null {
   return currentPort
-}
-
-/**
- * 현재 라우팅 테이블을 반환합니다.
- */
-export function getRoutes(): Map<string, number> {
-  return new Map(routes)
 }
 

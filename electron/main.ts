@@ -323,6 +323,8 @@ ipcMain.handle('get-k8s-pods', async (_, context: string, namespace: string) => 
 })
 
 // 제외할 namespace 목록 (시스템 + 사용자 지정)
+// Note: electron 프로세스에서는 상수 파일을 직접 import할 수 없으므로 여기에 정의
+// src/constants/namespaces.ts와 동기화 필요
 const EXCLUDED_NAMESPACES = [
   // 시스템 namespace
   'kube-system',
@@ -340,6 +342,7 @@ const EXCLUDED_NAMESPACES = [
   'submarine-acct',
   'test-ui',
   'tigera-operator',
+  'opentelemetry-operator-system',
 ]
 
 // Kubernetes Client로 모든 namespace의 Pod 목록 조회 (최적화)
@@ -658,8 +661,8 @@ ipcMain.handle('start-service-port-forward', async (_, config: {
   try {
     const { forwarder } = getKubeClient(config.context)
     
-    // portfinder로 사용 가능한 포트 찾기
-    const targetLocalPort = await portfinder.getPortPromise()
+    // portfinder로 사용 가능한 포트 찾기 (9000번부터 시작)
+    const targetLocalPort = await portfinder.getPortPromise({ port: 9000 })
 
     // net.Server를 생성하여 포트포워딩
     const server = net.createServer((socket) => {
@@ -696,6 +699,9 @@ ipcMain.handle('start-service-port-forward', async (_, config: {
 })
 
 // 유틸리티 함수들
+// Note: calculateAge는 src/utils/date.ts에 정의되어 있지만,
+// electron 프로세스에서는 직접 import할 수 없으므로 여기에 유지
+// 로직은 src/utils/date.ts와 동기화 필요
 function calculateAge(creationTimestamp: string): string {
   try {
     const created = new Date(creationTimestamp).getTime()
@@ -715,6 +721,9 @@ function calculateAge(creationTimestamp: string): string {
   }
 }
 
+// Note: extractDeploymentName는 src/utils/pod.ts에 정의되어 있지만,
+// electron 프로세스에서는 직접 import할 수 없으므로 여기에 유지
+// 로직은 src/utils/pod.ts와 동기화 필요
 function extractDeploymentName(podItem: any): string {
   try {
     const ownerReferences = podItem.metadata?.ownerReferences || []
@@ -754,9 +763,9 @@ ipcMain.handle('start-port-forward', async (_, config: {
     
     // 포트가 이미 사용 중인지 확인
     if (portForwardServers.has(config.localPort)) {
-      // 이미 추적 중인 서버가 있으면 다른 포트 사용
+      // 이미 추적 중인 서버가 있으면 다른 포트 사용 (9000번부터 시작)
       console.log(`[Main] Port ${config.localPort} is already tracked, finding available port...`)
-      targetLocalPort = await portfinder.getPortPromise({ port: config.localPort })
+      targetLocalPort = await portfinder.getPortPromise({ port: Math.max(config.localPort, 9000) })
       console.log(`[Main] Using alternative port: ${targetLocalPort}`)
     } else {
       // 포트가 실제로 사용 가능한지 확인
@@ -774,9 +783,9 @@ ipcMain.handle('start-port-forward', async (_, config: {
       })
       
       if (isPortInUse) {
-        // 사용 중이면 자동으로 사용 가능한 포트 찾기
+        // 사용 중이면 자동으로 사용 가능한 포트 찾기 (9000번부터 시작)
         console.log(`[Main] Port ${config.localPort} is already in use, finding available port...`)
-        targetLocalPort = await portfinder.getPortPromise({ port: config.localPort })
+        targetLocalPort = await portfinder.getPortPromise({ port: Math.max(config.localPort, 9000) })
         console.log(`[Main] Using alternative port: ${targetLocalPort}`)
       }
     }
@@ -798,9 +807,9 @@ ipcMain.handle('start-port-forward', async (_, config: {
 
       server.on('error', (err: any) => {
         console.error('[Main] Port forward server error:', err)
-        // EADDRINUSE 에러인 경우 다른 포트 시도
+        // EADDRINUSE 에러인 경우 다른 포트 시도 (9000번부터 시작)
         if (err.code === 'EADDRINUSE') {
-          portfinder.getPortPromise({ port: targetLocalPort })
+          portfinder.getPortPromise({ port: Math.max(targetLocalPort, 9000) })
             .then((newPort) => {
               server.listen(newPort, () => {
                 console.log(`[Main] Forwarding 127.0.0.1:${newPort} -> ${config.context}/${config.namespace}/${config.pod}:${config.remotePort} (retry)`)
@@ -833,9 +842,24 @@ ipcMain.handle('stop-port-forward', async (_, pid: number) => {
     const server = portForwardServers.get(pid)
     if (server) {
       return new Promise((resolve) => {
+        // 서버가 이미 닫혔는지 확인
+        if (!server.listening) {
+          portForwardServers.delete(pid)
+          console.log(`[Main] Port forward server on port ${pid} was already closed`)
+          resolve({ success: true, error: null })
+          return
+        }
+        
         server.close(() => {
           portForwardServers.delete(pid)
           console.log(`[Main] Stopped port forward on port ${pid}`)
+          resolve({ success: true, error: null })
+        })
+        
+        // 에러가 발생해도 맵에서 제거
+        server.on('error', (err) => {
+          console.error(`[Main] Error closing port forward server on port ${pid}:`, err)
+          portForwardServers.delete(pid)
           resolve({ success: true, error: null })
         })
       })
@@ -852,6 +876,13 @@ ipcMain.handle('stop-port-forward', async (_, pid: number) => {
       return { success: true, error: null }
     }
   } catch (error: any) {
+    // 에러가 발생해도 맵에서 제거 시도
+    try {
+      portForwardServers.delete(pid)
+      portForwardProcesses.delete(pid)
+    } catch {
+      // 무시
+    }
     return { 
       success: false, 
       error: error.message || String(error) 

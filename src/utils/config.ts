@@ -50,14 +50,4 @@ export function getNamespaceDefaultPorts(): Map<string, number> {
   return portMap
 }
 
-/**
- * 허용된 네임스페이스 목록을 반환합니다.
- * VITE_ALLOWED_NAMESPACES는 더 이상 사용하지 않으며, 모든 namespace를 처리합니다.
- * 시스템 namespace (kube-system, kube-public, kube-node-lease)는 자동으로 제외됩니다.
- * @deprecated 이 함수는 하위 호환성을 위해 유지되지만 항상 빈 Set을 반환합니다.
- */
-export function getAllowedNamespaces(): Set<string> {
-  // 모든 namespace를 처리하므로 빈 Set 반환 (필터링 없음)
-  return new Set<string>()
-}
 

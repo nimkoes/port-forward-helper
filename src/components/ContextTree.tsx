@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import type { KubernetesContext, Namespace, PortForwardConfig } from '@/types'
+import { EXCLUDED_NAMESPACES } from '@/constants/namespaces'
+import { hasActivePortForward } from '@/utils/portForward'
 import './ContextTree.css'
 
 interface ContextTreeProps {
@@ -19,24 +21,6 @@ interface ContextTreeProps {
   allForwarding: Set<string>
   allForwardProgress: Map<string, { current: number; total: number }>
 }
-
-// 제외할 namespace 목록
-const EXCLUDED_NAMESPACES = [
-  'kube-system',
-  'kube-public',
-  'kube-node-lease',
-  'default',
-  'argocd',
-  'azp',
-  'calico-system',
-  'gateway',
-  'migx',
-  'projectcontour',
-  'submarine',
-  'submarine-acct',
-  'test-ui',
-  'tigera-operator',
-]
 
 export const ContextTree: React.FC<ContextTreeProps> = ({
   contexts,
@@ -121,8 +105,7 @@ export const ContextTree: React.FC<ContextTreeProps> = ({
       const podSet = new Set<string>()
       for (const [namespace, namespaceMap] of contextMap.entries()) {
         for (const [podName, podMap] of namespaceMap.entries()) {
-          const hasActivePortForward = Array.from(podMap.values()).some(pf => pf.active)
-          if (hasActivePortForward) {
+          if (hasActivePortForward(podMap)) {
             podSet.add(podName)
           }
         }

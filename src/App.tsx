@@ -6,29 +6,12 @@ import { useKubectl } from './hooks/useKubectl'
 import { usePortForward } from './hooks/usePortForward'
 import { getServices, getPods } from './utils/kubectl'
 import { generateServiceUrl, extractHostsDomain, generateDomain } from './utils/domain'
+import { isHttpServicePort, findMatchingPods } from './utils/service'
+import { hasActivePortForward, getActiveLocalPorts } from './utils/portForward'
+import { findLatestPod } from './utils/pod'
 import type { KubernetesContext, Namespace, Pod, PortForwardConfig, Service, ServicePort } from './types'
+import { EXCLUDED_NAMESPACES } from './constants/namespaces'
 import './App.css'
-
-// 제외할 namespace 목록 (시스템 + 사용자 지정)
-const EXCLUDED_NAMESPACES = [
-  // 시스템 namespace
-  'kube-system',
-  'kube-public',
-  'kube-node-lease',
-  // 사용자 지정 제외 namespace
-  'default',
-  'argocd',
-  'azp',
-  'calico-system',
-  'gateway',
-  'migx',
-  'projectcontour',
-  'submarine',
-  'submarine-acct',
-  'test-ui',
-  'tigera-operator',
-  'opentelemetry-operator-system',
-]
 
 function App() {
   const { fetchContexts, fetchNamespaces, fetchPods } = useKubectl()
@@ -87,10 +70,6 @@ function App() {
   // 이 useEffect는 loadPodsForNamespaces가 정의된 후에 실행되어야 함
   // hosts 파일 수정은 기본적으로 비활성화 (비밀번호 요청 방지)
   const [enableHostsModification, setEnableHostsModification] = useState(true)
-  // 컨텍스트별로 선택된 Pod를 저장 (Map<context, Set<podName>>)
-  const [selectedPodsByContext, setSelectedPodsByContext] = useState<Map<string, Set<string>>>(new Map())
-  // 컨텍스트별로 확장된 Deployment를 저장 (Map<context, Set<deployment>>)
-  const [expandedDeploymentsByContext, setExpandedDeploymentsByContext] = useState<Map<string, Set<string>>>(new Map())
   // 캐시: 컨텍스트별로 Service 정보를 저장 (Map<context, Map<namespace, Service[]>>)
   const [servicesByContextAndNamespace, setServicesByContextAndNamespace] = useState<Map<string, Map<string, Service[]>>>(new Map())
   // 확장된 Context를 저장 (트리 구조용)
@@ -130,262 +109,6 @@ function App() {
   useEffect(() => {
     loadContexts()
   }, [loadContexts])
-
-  // HTTP 프로토콜 판단 헬퍼 함수
-  const isHttpPort = useCallback((servicePort: { name?: string }, podPort: { name?: string; containerPort: number }): boolean => {
-    // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
-    if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
-      return true
-    }
-    // Pod 포트 이름에 "http"가 포함되어 있는지 확인
-    if (podPort.name && podPort.name.toLowerCase().includes('http')) {
-      return true
-    }
-    return false
-  }, [])
-
-  // Pod 기반 자동 포트포워딩 설정
-  const setupPodPortForwards = useCallback(async (context: string) => {
-    if (!window.electronAPI) {
-      console.warn('[App] electronAPI not available yet')
-      return
-    }
-
-    try {
-      console.log(`[App] Setting up pod port forwards for context: ${context}`)
-      
-      // 1. 모든 namespace 조회 (제외할 namespace 제외)
-      const allNamespaces = await fetchNamespaces(context)
-      const namespaces = allNamespaces
-        .filter(ns => !EXCLUDED_NAMESPACES.includes(ns.name))
-        .map(ns => ns.name)
-        .filter(ns => ns && ns.trim() !== '') // 빈 namespace 제거
-      
-      console.log(`[App] Found ${namespaces.length} namespaces to process:`, namespaces)
-      
-      // 2. 각 namespace의 모든 Pod와 Service 조회
-      const podPortForwards: Array<{
-        context: string
-        namespace: string
-        podName: string
-        podPort: number
-        serviceName?: string
-        servicePort?: number
-      }> = []
-
-      for (const namespace of namespaces) {
-        // namespace 유효성 재확인
-        if (!namespace || typeof namespace !== 'string' || namespace.trim() === '') {
-          console.warn(`[App] Skipping invalid namespace: ${namespace}`)
-          continue
-        }
-        
-        try {
-          // Pod 조회
-          const pods = await getPods(context, namespace)
-          console.log(`[App] Found ${pods.length} pods in namespace ${namespace}`)
-          
-          // Service 조회 (HTTP 포트 판단을 위해)
-          const services = await getServices(context, namespace)
-          console.log(`[App] Found ${services.length} services in namespace ${namespace}`)
-          
-          // Service 정보 저장
-          setServicesByContextAndNamespace(prev => {
-        const newMap = new Map(prev)
-            if (!newMap.has(context)) {
-              newMap.set(context, new Map())
-            }
-            const contextMap = newMap.get(context)!
-            contextMap.set(namespace, services)
-        return newMap
-      })
-
-          // Pod와 Service 매칭을 위한 맵 생성
-          const serviceMap = new Map<string, Service>()
-          for (const service of services) {
-            if (service.selector) {
-              // Service의 selector로 매칭되는 Pod 찾기
-              for (const pod of pods) {
-                if (!pod.labels) continue
-                let matches = true
-                for (const [key, value] of Object.entries(service.selector)) {
-                  if (pod.labels[key] !== value) {
-                    matches = false
-                    break
-                  }
-                }
-                if (matches) {
-                  // Pod 이름을 키로 Service 저장 (여러 Service가 있을 수 있으므로 첫 번째만 저장)
-                  if (!serviceMap.has(pod.name)) {
-                    serviceMap.set(pod.name, service)
-                  }
-                }
-              }
-            }
-          }
-
-          // Pod를 Deployment별로 그룹화
-          const deploymentPodsMap = new Map<string, Pod[]>()
-          for (const pod of pods) {
-            const deployment = pod.deployment || pod.name
-            if (!deploymentPodsMap.has(deployment)) {
-              deploymentPodsMap.set(deployment, [])
-            }
-            deploymentPodsMap.get(deployment)!.push(pod)
-          }
-
-          // 각 Deployment에서 가장 최근 Pod 선택 및 포트포워딩 설정
-          for (const [deployment, deploymentPods] of deploymentPodsMap.entries()) {
-            // creationTimestamp 기준으로 정렬하여 가장 최근 Pod 선택
-            const sortedPods = [...deploymentPods].sort((a, b) => {
-              const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
-              const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
-              return bTime - aTime // 최신이 먼저
-            })
-            
-            const latestPod = sortedPods[0]
-            if (!latestPod) continue
-
-            // Service 정보 가져오기
-            const service = serviceMap.get(latestPod.name)
-
-            // 각 포트에 대해 HTTP 포트인지 확인하고 포트포워딩 설정
-            for (const podPort of latestPod.ports) {
-              let isHttp = false
-              
-              if (service) {
-                // Service의 포트 중 Pod 포트와 매칭되는 것 찾기
-                for (const servicePort of service.ports) {
-                  const targetPort = servicePort.targetPort
-                  let matches = false
-                  
-                  if (typeof targetPort === 'number') {
-                    matches = targetPort === podPort.containerPort
-      } else {
-                    matches = targetPort === podPort.name
-                  }
-                  
-                  if (matches) {
-                    isHttp = isHttpPort(servicePort, podPort)
-                    break
-                  }
-                }
-              } else {
-                // Service가 없으면 Pod 포트 이름만 확인
-                isHttp = podPort.name ? podPort.name.toLowerCase().includes('http') : false
-              }
-
-              // HTTP 포트만 포트포워딩 설정
-              if (isHttp) {
-                podPortForwards.push({
-                  context,
-                  namespace,
-                  podName: latestPod.name,
-                  podPort: podPort.containerPort,
-                  serviceName: service?.name,
-                  servicePort: service?.ports.find(sp => {
-                    const tp = sp.targetPort
-                    return (typeof tp === 'number' && tp === podPort.containerPort) ||
-                           (typeof tp === 'string' && tp === podPort.name)
-                  })?.port,
-                })
-              }
-            }
-          }
-        } catch (error) {
-          console.error(`[App] Failed to process pods in namespace ${namespace}:`, error)
-        }
-      }
-
-      console.log(`[App] Setting up ${podPortForwards.length} pod port forwards`)
-      
-      // 3. 각 Pod 포트에 대해 포트포워딩 시작
-      for (const forward of podPortForwards) {
-        try {
-          // 로컬 포트는 Pod 포트와 동일하게 사용
-          const localPort = forward.podPort
-
-          // 포트포워딩 시작
-          const result = await startPortForward(
-            forward.context,
-            forward.namespace,
-            forward.podName,
-            localPort,
-            forward.podPort
-          )
-          
-          if (!result || !result.pid || !result.localPort) {
-            console.error(`[App] Failed to start port forward for ${forward.podName}:${forward.podPort}`)
-            continue
-          }
-          
-          const pid = result.pid
-          const actualLocalPort = result.localPort
-
-          // URL 생성 (Service가 있으면 Service URL, 없으면 Pod 기반 URL)
-          let domain: string
-          if (forward.serviceName && forward.servicePort !== undefined) {
-            domain = generateServiceUrl(forward.serviceName, forward.namespace, forward.podPort)
-          } else {
-            // Pod 정보에서 deployment 이름 찾기
-            if (!forward.namespace || forward.namespace.trim() === '') {
-              console.warn(`[App] Namespace is empty for pod ${forward.podName}, using pod name as deployment`)
-              domain = generateDomain(forward.podName, 'default')
-            } else {
-              try {
-                const pods = await getPods(forward.context, forward.namespace)
-                const pod = pods.find(p => p.name === forward.podName)
-                const deploymentName = pod?.deployment || forward.podName
-                domain = generateDomain(deploymentName, forward.namespace)
-              } catch (error) {
-                console.error(`[App] Failed to get pods for namespace ${forward.namespace}:`, error)
-                domain = generateDomain(forward.podName, forward.namespace || 'default')
-              }
-            }
-          }
-
-          // PortForwardConfig 생성
-          const configKey = `${forward.context}:${forward.namespace}:${forward.podName}`
-          const config: PortForwardConfig = {
-            id: `${configKey}:${forward.podPort}`,
-            context: forward.context,
-            namespace: forward.namespace,
-            pod: forward.podName,
-            localPort: actualLocalPort, // 실제 할당된 포트 사용
-            remotePort: forward.podPort,
-            pid,
-            active: true,
-            domain,
-          }
-
-          // portForwards 상태 업데이트
-          setPortForwards(prev => {
-            const newMap = new Map(prev)
-            if (!newMap.has(forward.context)) {
-              newMap.set(forward.context, new Map())
-            }
-            const contextMap = newMap.get(forward.context)!
-            if (!contextMap.has(forward.namespace)) {
-              contextMap.set(forward.namespace, new Map())
-            }
-            const namespaceMap = contextMap.get(forward.namespace)!
-            if (!namespaceMap.has(forward.podName)) {
-              namespaceMap.set(forward.podName, new Map())
-            }
-            const podMap = namespaceMap.get(forward.podName)!
-            podMap.set(forward.podPort, config)
-            return newMap
-          })
-        } catch (error) {
-          console.error(`[App] Failed to start port forward for ${forward.podName}:${forward.podPort}:`, error)
-        }
-      }
-
-      console.log(`[App] Pod port forwards setup completed`)
-    } catch (error) {
-      console.error('[App] Failed to setup pod port forwards:', error)
-    }
-  }, [isHttpPort, startPortForward, fetchNamespaces])
 
   // 선택된 네임스페이스의 Pod와 Service를 로드 (최적화: 전체 조회 후 매핑)
   // 반환값: Map<namespace, { pods: Pod[], services: Service[] }>
@@ -937,24 +660,15 @@ function App() {
 
   // 모든 활성 포트포워딩의 외부 포트 목록 수집
   const activeLocalPorts = React.useMemo(() => {
-    const ports = new Set<number>()
-    for (const [context, contextMap] of portForwards.entries()) {
-      for (const [namespace, namespaceMap] of contextMap.entries()) {
-        for (const [podName, podMap] of namespaceMap.entries()) {
-          for (const [remotePort, config] of podMap.entries()) {
-            if (config.active) {
-              ports.add(config.localPort)
-            }
-          }
-        }
-      }
-    }
-    return ports
+    return getActiveLocalPorts(portForwards)
   }, [portForwards])
 
   // 사용 가능한 포트를 찾는 헬퍼 함수
+  // 로컬 포트는 9000번부터 시작 (8000번 포트 충돌 방지)
   const findAvailablePort = useCallback((startPort: number, activePorts: Set<number>): number | null => {
-    for (let port = startPort; port <= 65535; port++) {
+    // 시작 포트가 9000 미만이면 9000부터 시작
+    const actualStartPort = Math.max(startPort, 9000)
+    for (let port = actualStartPort; port <= 65535; port++) {
       if (!activePorts.has(port)) {
         return port
       }
@@ -1017,8 +731,8 @@ function App() {
       }
     }
 
-    // 프록시 서버 라우팅 업데이트
-    if (activeRoutes.size > 0 && currentProxyPort) {
+    // 프록시 서버 라우팅 업데이트 (빈 라우팅도 업데이트하여 정리)
+    if (currentProxyPort) {
       try {
         const routesObj: Record<string, number> = {}
         for (const [domain, port] of activeRoutes.entries()) {
@@ -1031,7 +745,7 @@ function App() {
         console.error('Failed to update proxy routes:', error)
       }
     } else {
-      console.log('[App] Skipping proxy route update:', {
+      console.log('[App] Skipping proxy route update (server not running):', {
         activeRoutesSize: activeRoutes.size,
         currentProxyPort,
       })
@@ -1146,31 +860,11 @@ function App() {
       }
       
       if (service.selector) {
-        const matchingPods: Pod[] = []
-        for (const pod of namespacePods) {
-          if (!pod.labels || pod.status.toLowerCase() === 'failed') continue
-          
-          let matches = true
-          for (const [key, value] of Object.entries(service.selector)) {
-            if (pod.labels[key] !== value) {
-              matches = false
-        break
-      }
-    }
-
-          if (matches) {
-            matchingPods.push(pod)
-          }
-        }
+        const matchingPods = findMatchingPods(service, namespacePods, true)
 
         // 최신 Pod 선택
         if (matchingPods.length > 0) {
-          const sortedPods = [...matchingPods].sort((a, b) => {
-            const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
-            const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
-            return bTime - aTime // 최신이 먼저
-          })
-          matchedPod = sortedPods[0]
+          matchedPod = findLatestPod(matchingPods)
         }
       }
 
@@ -1283,30 +977,10 @@ function App() {
       const namespacePods = podsByNamespace.get(namespace) || []
       
       if (service.selector) {
-        const matchingPods: Pod[] = []
-        for (const pod of namespacePods) {
-          if (!pod.labels || pod.status.toLowerCase() === 'failed') continue
-          
-          let matches = true
-          for (const [key, value] of Object.entries(service.selector)) {
-            if (pod.labels[key] !== value) {
-              matches = false
-              break
-            }
-          }
-          
-          if (matches) {
-            matchingPods.push(pod)
-          }
-        }
+          const matchingPods = findMatchingPods(service, namespacePods, true)
 
         if (matchingPods.length > 0) {
-          const sortedPods = [...matchingPods].sort((a, b) => {
-            const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
-            const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
-            return bTime - aTime
-          })
-          matchedPod = sortedPods[0]
+          matchedPod = findLatestPod(matchingPods)
         }
       }
 
@@ -1365,31 +1039,6 @@ function App() {
     }
   }, [activeContext, podsByNamespace, portForwards, servicesByContextAndNamespace, activeLocalPorts, findAvailablePort, startPortForward, stopPortForward])
 
-  // HTTP 포트인지 확인하는 함수
-  const isHttpServicePort = useCallback((servicePort: Service['ports'][0]): boolean => {
-    // grpc 포트는 제외
-    if (servicePort.name && servicePort.name.toLowerCase().includes('grpc')) {
-      return false
-    }
-    // Service 포트 이름에 "http"가 포함되어 있는지 확인 (대소문자 무시)
-    if (servicePort.name && servicePort.name.toLowerCase().includes('http')) {
-      return true
-    }
-    // 포트 이름이 없거나 "http"가 포함되지 않았지만, 포트 번호가 80이면 HTTP로 간주
-    if (servicePort.port === 80) {
-      return true
-    }
-    // 포트 이름이 없거나 빈 문자열인 경우 HTTP로 간주 (grpc가 아닌 경우)
-    if (!servicePort.name || servicePort.name.trim() === '' || servicePort.name === '<unset>') {
-      return true
-    }
-    // 일반적인 HTTP 포트 번호들도 HTTP로 간주
-    const commonHttpPorts = [80, 8080, 3000, 8000, 5000, 4000, 9000]
-    if (commonHttpPorts.includes(servicePort.port)) {
-      return true
-    }
-    return false
-  }, [])
 
   // 모든 서비스에 포트포워딩 활성화
   const handleAllForward = useCallback(async (context: string) => {
@@ -1542,12 +1191,7 @@ function App() {
           }
 
           // 최신 Pod 선택
-          const sortedPods = [...matchingPods].sort((a, b) => {
-            const aTime = a.creationTimestamp ? new Date(a.creationTimestamp).getTime() : 0
-            const bTime = b.creationTimestamp ? new Date(b.creationTimestamp).getTime() : 0
-            return bTime - aTime // 최신이 먼저
-          })
-          const matchedPod = sortedPods[0]
+          const matchedPod = findLatestPod(matchingPods)
 
           // targetPort를 Pod의 실제 포트 번호로 변환
           let remotePort: number
@@ -1577,6 +1221,9 @@ function App() {
         next.set(context, { current: 0, total: servicesToForward.length })
         return next
       })
+
+      // 루프 시작 전에 현재 활성 포트 목록을 한 번만 계산 (성능 최적화)
+      const initialActivePorts = getActiveLocalPorts(portForwards)
 
       // 순차적으로 포트포워딩 처리 (직접 포트포워딩 시작)
       for (let i = 0; i < servicesToForward.length; i++) {
@@ -1623,19 +1270,10 @@ function App() {
           const servicePort = httpPort.port || 80
           const domain = generateServiceUrl(service.name, namespace, servicePort)
 
-          // 현재 활성 포트 목록 가져오기 (직접 읽기, 상태 변경 없음)
-          const currentActivePorts = new Set<number>()
-          for (const [, ctxMap] of portForwards.entries()) {
-            for (const [, nsMap] of ctxMap.entries()) {
-              for (const [, pMap] of nsMap.entries()) {
-                for (const [, config] of pMap.entries()) {
-                  if (config.active) {
-                    currentActivePorts.add(config.localPort)
-                  }
-                }
-              }
-            }
-          }
+          // 현재 활성 포트 목록 가져오기 (초기 포트 + 이전 루프에서 추가된 포트)
+          // 포트포워딩이 추가되면 portForwards가 업데이트되므로, 최신 상태를 다시 읽어야 함
+          // 하지만 성능을 위해 초기 포트만 사용하고, 필요시에만 재계산
+          const currentActivePorts = getActiveLocalPorts(portForwards)
 
           // 로컬 포트 찾기 (사용 가능한 포트)
           const availablePort = findAvailablePort(remotePort, currentActivePorts)
@@ -1881,8 +1519,7 @@ function App() {
         }
         
         for (const [podName, podMap] of namespaceMap.entries()) {
-          const hasActivePortForward = Array.from(podMap.values()).some(pf => pf.active)
-          if (hasActivePortForward) {
+          if (hasActivePortForward(podMap)) {
             // 해당 namespace의 Pod와 Service가 모두 로드되었는지 확인
             const existingPods = currentPodsByNamespace.get(namespace) || []
             const podInfo = existingPods.find(p => p.name === podName)
@@ -1992,9 +1629,8 @@ function App() {
       // activeContext가 없어도 포트포워딩 중인 Pod는 표시 (Map 기반 조회)
       for (const [context, contextMap] of portForwards.entries()) {
         for (const [namespace, namespaceMap] of contextMap.entries()) {
-          for (const [podName, podMap] of namespaceMap.entries()) {
-            const hasActivePortForward = Array.from(podMap.values()).some(pf => pf.active)
-            if (hasActivePortForward) {
+        for (const [podName, podMap] of namespaceMap.entries()) {
+          if (hasActivePortForward(podMap)) {
               // 포트포워딩 중인 Pod 찾기 (Map 기반 조회)
               const podInfo = podsByNameMap.get(podName)
               if (podInfo && podInfo.namespace === namespace) {
@@ -2029,8 +1665,7 @@ function App() {
     for (const [context, contextMap] of portForwards.entries()) {
       for (const [namespace, namespaceMap] of contextMap.entries()) {
         for (const [podName, podMap] of namespaceMap.entries()) {
-          const hasActivePortForward = Array.from(podMap.values()).some(pf => pf.active)
-          if (hasActivePortForward) {
+          if (hasActivePortForward(podMap)) {
             const podInfo = podsByNameMap.get(podName)
             if (podInfo && podInfo.namespace === namespace) {
               const key = `${podInfo.namespace}:${podInfo.pod.name}`
@@ -2046,30 +1681,6 @@ function App() {
     
     return allPods
   }, [activeContext, visibleNamespacesByContext, podsByNamespace, podsByNameMap, portForwards, getVisibleNamespacesForContext])
-
-  // 모든 포트포워딩 맵 (Pod 이름 -> 포트 번호 -> 설정) - 모든 context 포함
-  const currentPortForwards = React.useMemo(() => {
-    const result = new Map<string, Map<number, PortForwardConfig>>()
-    
-    // 모든 context의 포트포워딩 수집
-    for (const [context, contextMap] of portForwards.entries()) {
-    for (const [namespace, namespaceMap] of contextMap.entries()) {
-        for (const [podName, podMap] of namespaceMap.entries()) {
-          // 이미 있는 Pod면 병합, 없으면 추가
-          if (!result.has(podName)) {
-            result.set(podName, new Map(podMap))
-          } else {
-            const existingMap = result.get(podName)!
-            for (const [port, config] of podMap.entries()) {
-              existingMap.set(port, config)
-            }
-          }
-        }
-      }
-    }
-    
-    return result
-  }, [portForwards])
 
   // 모든 context의 모든 Service 목록
   const currentServices = React.useMemo(() => {
@@ -2322,10 +1933,15 @@ function App() {
           console.error(`Failed to disable port forward for ${item.podName}:${item.remotePort}`, error)
         }
       }
+      
+      // 모든 포트포워딩 비활성화 완료 후 프록시 서버와 hosts 파일 업데이트
+      // 상태 업데이트가 완료되도록 약간의 지연 후 호출
+      await new Promise(resolve => setTimeout(resolve, 200))
+      await updateProxyAndHosts()
     } finally {
       setDisablingAll(false)
     }
-  }, [portForwards, activeContext, handleContextChange, stopPortForward, disablingAll])
+  }, [portForwards, activeContext, handleContextChange, stopPortForward, disablingAll, updateProxyAndHosts])
 
   // GNB용 새로고침 핸들러
   const handleRefreshForGNB = useCallback(async () => {
