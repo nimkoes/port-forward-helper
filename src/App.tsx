@@ -717,12 +717,15 @@ function App() {
 
     // 프록시 서버 시작 (활성 포트포워딩이 있고 서버가 실행 중이 아니면)
     // ref를 사용하여 최신 값을 읽어서 의존성 배열에서 제거
-    const currentProxyPort = proxyServerPortRef.current
+    let currentProxyPort = proxyServerPortRef.current
     if (activeRoutes.size > 0 && !currentProxyPort) {
       try {
         const result = await window.electronAPI.startProxyServer(80)
         if (result.success && result.port) {
           setProxyServerPort(result.port)
+          // 프록시 서버 시작 후 즉시 포트를 업데이트하여 라우팅 업데이트에 사용
+          currentProxyPort = result.port
+          proxyServerPortRef.current = result.port
         } else {
           console.error('Failed to start proxy server:', result.error)
         }
@@ -732,6 +735,7 @@ function App() {
     }
 
     // 프록시 서버 라우팅 업데이트 (빈 라우팅도 업데이트하여 정리)
+    // 프록시 서버가 실행 중이거나 방금 시작한 경우 라우팅 업데이트
     if (currentProxyPort) {
       try {
         const routesObj: Record<string, number> = {}
